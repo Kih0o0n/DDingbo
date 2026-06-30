@@ -14,7 +14,6 @@
       --blue: #2563eb;
       --dark: #0f172a;
       --red: #ef4444;
-      --green: #22c55e;
       --app-height: 100dvh;
     }
 
@@ -152,7 +151,6 @@
       box-shadow: 0 10px 20px rgba(0,0,0,.16);
     }
 
-    .pill.green { background: rgba(134, 239, 172, .94); }
     .pill.blue { background: rgba(147, 197, 253, .94); }
     .pill.red { background: rgba(252, 165, 165, .94); }
     .pill.purple { background: rgba(216, 180, 254, .94); }
@@ -507,7 +505,7 @@
         <p class="subtitle">32강은 못 갔지만…<br />너는 살아남아라.</p>
         <div class="tips">
           <div class="tip">👈 아래 ◀ ▶ 버튼을 길게 눌러 움직이세요.</div>
-          <div class="tip">👟 축구화는 잠깐 더 빠르게 움직입니다.</div>
+          <div class="tip">🔥 아슬아슬 회피를 연속으로 성공하면 COMBO UP! 보너스 점수가 커집니다.</div>
           <div class="tip">📺 VAR는 한 번 충돌을 무효 처리합니다.</div>
           <div class="tip">⚠️ 가까스로 피하면 랭킹 점수가 크게 올라갑니다!</div>
         </div>
@@ -604,6 +602,7 @@
       });
       const LEADERBOARD_LIMIT = 5;
       const SERVER_RECORD_LIMIT = 20;
+      const COMBO_WINDOW_SECONDS = 3;
       const DPR_LIMIT = 2;
 
       // 실행 상태
@@ -637,7 +636,8 @@
       let rightHeld = false;
       const keys = new Set();
       let toastTimer = 0;
-      let combo = 1;
+      let combo = 0;
+      let comboExpiresAt = 0;
       let nearCount = 0;
       let lastMilestone = 0;
 
@@ -661,10 +661,7 @@
         drawW: 0,
         drawH: 0,
         baseSpeed: 430,
-        speed: 430,
-        vx: 0,
         shield: 0,
-        shoesUntil: 0,
         invincibleUntil: 0,
         blinkUntil: 0,
         noteUntil: 0
@@ -904,7 +901,8 @@
         elapsed = 0;
         score = 0;
         bonusScore = 0;
-        combo = 1;
+        combo = 0;
+        comboExpiresAt = 0;
         nearCount = 0;
         lastMilestone = 0;
         nextObstacleAt = 0;
@@ -926,10 +924,7 @@
         player.x = W / 2;
         player.r = Math.max(9, Math.min(12, W * 0.025));
         positionPlayer();
-        player.speed = player.baseSpeed;
-        player.vx = 0;
         player.shield = 0;
-        player.shoesUntil = 0;
         player.invincibleUntil = 0;
         player.blinkUntil = 0;
         player.noteUntil = 0;
@@ -1057,13 +1052,11 @@
       }
 
       function updatePlayer(dt) {
-        const shoeBoost = isShoesActive() ? 1.45 : 1;
-        player.speed = player.baseSpeed * shoeBoost;
         let dir = 0;
         if (leftHeld || keys.has('ArrowLeft') || keys.has('KeyA')) dir -= 1;
         if (rightHeld || keys.has('ArrowRight') || keys.has('KeyD')) dir += 1;
         if (dir !== 0) {
-          player.x += dir * player.speed * dt;
+          player.x += dir * player.baseSpeed * dt;
         }
         const sideRadius = getPlayerHorizontalRadius();
         player.x = clamp(player.x, sideRadius, W - sideRadius);
@@ -1199,7 +1192,7 @@
       }
 
       function spawnItem() {
-        const types = ['var', 'shoes', 'note'];
+        const types = ['var', 'note'];
         const type = types[Math.floor(Math.random() * types.length)];
         items.push({
           type,
@@ -1308,6 +1301,8 @@
 
       function nearMiss(x, y) {
         nearCount += 1;
+        combo = elapsed <= comboExpiresAt ? Math.min(5, combo + 1) : 1;
+        comboExpiresAt = elapsed + COMBO_WINDOW_SECONDS;
         const bonus = 12 * combo;
         bonusScore += bonus;
         score = Math.floor(elapsed * 10) + bonusScore;
@@ -1336,10 +1331,6 @@
           player.shield = Math.min(2, player.shield + 1);
           showToast('VAR 획득! 1회 무효', 900);
           burst(item.x, item.y, 22, '#93c5fd');
-        } else if (item.type === 'shoes') {
-          player.shoesUntil = elapsed + 6.2;
-          showToast('축구화 장착! 속도 UP', 900);
-          burst(item.x, item.y, 22, '#86efac');
         } else if (item.type === 'note') {
           player.noteUntil = elapsed + 5.2;
           showToast('전술 노트! 슬로모션', 900);
@@ -1390,11 +1381,10 @@
       function updateHud() {
         timeText.textContent = formatTime(elapsed);
         scoreText.textContent = String(Math.round(score));
-        combo = Math.min(5, 1 + Math.floor(elapsed / 18) + Math.floor(nearCount / 8));
+        if (combo > 0 && elapsed > comboExpiresAt) combo = 0;
         const pills = [];
         if (combo > 1) pills.push(['🔥 COMBO x' + combo, 'red']);
         if (player.shield > 0) pills.push(['📺 VAR x' + player.shield, 'blue']);
-        if (isShoesActive()) pills.push(['👟 속도 UP ' + Math.ceil(player.shoesUntil - elapsed) + '초', 'green']);
         if (isNoteActive()) pills.push(['📋 슬로우 ' + Math.ceil(player.noteUntil - elapsed) + '초', 'purple']);
         if (nearCount > 0) pills.push(['⚡ 아슬아슬 ' + nearCount + '회', '']);
         statusRow.innerHTML = pills.map(([text, color]) => '<span class="pill ' + color + '">' + text + '</span>').join('');
@@ -1501,7 +1491,6 @@
         ctx.rotate(item.rot);
         const colors = {
           var: ['#dbeafe', '#60a5fa'],
-          shoes: ['#dcfce7', '#22c55e'],
           note: ['#f3e8ff', '#a855f7']
         };
         const [c1, c2] = colors[item.type] || colors.var;
@@ -1530,17 +1519,6 @@
         if (blink) return;
         ctx.save();
         ctx.translate(player.x, player.y);
-
-        if (isShoesActive()) {
-          ctx.globalAlpha = 0.22;
-          ctx.fillStyle = '#86efac';
-          for (let i = 1; i <= 3; i++) {
-            ctx.beginPath();
-            ctx.ellipse(-i * 16 * Math.sign(player.vx || 1), 20, player.r + i * 5, player.r * 0.7 + i * 3, 0, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          ctx.globalAlpha = 1;
-        }
 
         if (player.shield > 0) {
           ctx.strokeStyle = 'rgba(147,197,253,.95)';
@@ -1655,23 +1633,17 @@
         toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
       }
 
-      function isShoesActive() {
-        return elapsed < player.shoesUntil;
-      }
-
       function isNoteActive() {
         return elapsed < (player.noteUntil || 0);
       }
 
       function getItemIcon(type) {
         if (type === 'var') return 'VAR';
-        if (type === 'shoes') return '👟';
         return '📋';
       }
 
       function getItemLabel(type) {
         if (type === 'var') return 'VAR';
-        if (type === 'shoes') return '축구화';
         return '전술 노트';
       }
 
