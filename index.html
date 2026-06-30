@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#101827" />
   <title>띵보님 피하기</title>
-    <!-- v2.7: player illustration applied + mobile bottom clipping fix -->
   <style>
+    /* 기본 레이아웃 */
     :root {
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -67,6 +67,7 @@
       touch-action: none;
     }
 
+    /* 게임 HUD와 조작 버튼 */
     .hud {
       position: absolute;
       top: calc(10px + var(--safe-top));
@@ -130,17 +131,6 @@
       opacity: .86;
     }
 
-    #bestText {
-      min-width: 88px;
-      color: #111827;
-      background: rgba(255,255,255,.91);
-      border-color: rgba(255,255,255,.65);
-      text-align: center;
-      font-size: 12px;
-      font-weight: 1000;
-      white-space: nowrap;
-    }
-
     .status-row {
       grid-column: 1 / -1;
       display: flex;
@@ -202,6 +192,7 @@
       background: rgba(250,204,21,.34);
     }
 
+    /* 시작·게임오버 화면 */
     .overlay {
       position: absolute;
       inset: 0;
@@ -305,6 +296,7 @@
       background: #0f172a;
     }
 
+    /* 결과와 랭킹 */
     .result-box {
       margin: 16px 0 12px;
       padding: 14px;
@@ -454,6 +446,7 @@
       transform: translate(-50%, -50%) scale(1);
     }
 
+    /* 반응형 화면 보정 */
     @media (min-width: 700px) {
       .controls { padding-left: 24px; padding-right: 24px; }
       .control-btn { height: 70px; }
@@ -464,7 +457,6 @@
       .panel { padding: 6px 9px; border-radius: 14px; }
       .title-small { font-size: 10px; margin-bottom: 2px; }
       #timeText, #scoreText { font-size: 24px; }
-      #bestText { min-width: 72px; padding: 7px 8px; }
       .status-row { min-height: 0; gap: 4px; }
       .pill { padding: 4px 7px; font-size: 10px; }
       .controls { gap: 10px; padding: 6px 12px calc(7px + max(var(--safe-bottom), 4px)); }
@@ -486,6 +478,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
+    <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
     <div class="hud" aria-hidden="true">
@@ -497,7 +490,6 @@
         <div class="title-small">점수</div>
         <div class="score-line"><span id="scoreText">0</span><span class="unit">점</span></div>
       </div>
-      <div id="bestText" class="panel">BEST 0점</div>
       <div id="statusRow" class="status-row"></div>
     </div>
 
@@ -508,9 +500,9 @@
       <button id="rightBtn" class="control-btn" type="button" aria-label="오른쪽으로 이동">▶</button>
     </div>
 
+    <!-- 시작 화면 -->
     <section id="startOverlay" class="overlay">
       <div class="card">
-        <div class="badge">모바일 패러디 생존 게임</div>
         <h1>띵보님 피하기</h1>
         <p class="subtitle">32강은 못 갔지만…<br />너는 살아남아라.</p>
         <div class="tips">
@@ -523,6 +515,7 @@
       </div>
     </section>
 
+    <!-- 게임오버 화면 -->
     <section id="gameOverOverlay" class="overlay is-hidden">
       <div class="card">
         <div class="badge">휘슬!</div>
@@ -564,12 +557,12 @@
     (() => {
       'use strict';
 
+      // DOM 참조
       const app = document.getElementById('app');
       const canvas = document.getElementById('gameCanvas');
       const ctx = canvas.getContext('2d', { alpha: true });
       const timeText = document.getElementById('timeText');
       const scoreText = document.getElementById('scoreText');
-      const bestText = document.getElementById('bestText');
       const statusRow = document.getElementById('statusRow');
       const toast = document.getElementById('toast');
       const startOverlay = document.getElementById('startOverlay');
@@ -590,30 +583,41 @@
       const leftBtn = document.getElementById('leftBtn');
       const rightBtn = document.getElementById('rightBtn');
 
-      const STORAGE_BEST = 'ddingboNimAvoidBestScoreV23';
-      const STORAGE_TOP = 'ddingboNimAvoidTop5ScoreV23';
-      const STORAGE_NAME = 'ddingboNimAvoidPlayerNameV23';
-      const IMAGE_PATH = 'assets/hmb.png';
-      const PLAYER_IMAGE_PATH = 'assets/player.png';
-
-      // GitHub Pages만으로는 모든 이용자의 랭킹을 저장할 수 없습니다.
-      // Firebase Realtime Database를 만든 뒤 아래 주소만 실제 주소로 바꾸면 공유 랭킹이 켜집니다.
-      // 예: const FIREBASE_DATABASE_URL = 'https://your-project-id-default-rtdb.asia-southeast1.firebasedatabase.app';
-      const FIREBASE_DATABASE_URL = 'https://ddingbo-rank-default-rtdb.asia-southeast1.firebasedatabase.app';
-      const FIREBASE_BOARD_PATH = 'rankings';
+      // 저장 키와 외부 설정
+      const STORAGE_KEYS = Object.freeze({
+        bestScore: 'ddingboNimAvoidBestScoreV23',
+        leaderboard: 'ddingboNimAvoidTop5ScoreV23',
+        playerName: 'ddingboNimAvoidPlayerNameV23'
+      });
+      const ASSET_PATHS = Object.freeze({
+        obstacle: 'assets/hmb.png',
+        player: 'assets/player.png'
+      });
+      const FIREBASE_CONFIG = Object.freeze({
+        databaseUrl: 'https://ddingbo-rank-default-rtdb.asia-southeast1.firebasedatabase.app',
+        boardPath: 'rankings'
+      });
+      const GAME_STATE = Object.freeze({
+        READY: 'ready',
+        PLAYING: 'playing',
+        GAME_OVER: 'gameover'
+      });
+      const LEADERBOARD_LIMIT = 5;
+      const SERVER_RECORD_LIMIT = 20;
       const DPR_LIMIT = 2;
 
+      // 실행 상태
       let W = 0;
       let H = 0;
       let dpr = 1;
-      let state = 'ready';
+      let state = GAME_STATE.READY;
       let lastTime = 0;
       let startTime = 0;
       let hiddenAt = 0;
       let elapsed = 0;
       let score = 0;
       let bonusScore = 0;
-      let best = readNumber(STORAGE_BEST, 0);
+      let best = readNumber(STORAGE_KEYS.bestScore, 0);
       let top5 = readTop5();
       let pendingRecord = null;
       let sharedLeaderboardReady = false;
@@ -631,36 +635,39 @@
       let shake = 0;
       let leftHeld = false;
       let rightHeld = false;
-      let keys = new Set();
+      const keys = new Set();
       let toastTimer = 0;
       let combo = 1;
       let nearCount = 0;
-      let waveCount = 0;
       let lastMilestone = 0;
 
+      // 이미지와 게임 객체
       const hmbImg = new Image();
       hmbImg.onload = () => { hmbLoaded = true; };
       hmbImg.onerror = () => { hmbFailed = true; };
-      hmbImg.src = IMAGE_PATH;
+      hmbImg.src = ASSET_PATHS.obstacle;
 
       const playerImg = new Image();
       let playerLoaded = false;
       let playerFailed = false;
       playerImg.onload = () => { playerLoaded = true; };
       playerImg.onerror = () => { playerFailed = true; };
-      playerImg.src = PLAYER_IMAGE_PATH;
+      playerImg.src = ASSET_PATHS.player;
 
       const player = {
         x: 0,
         y: 0,
-        r: 23,
+        r: 12,
+        drawW: 0,
+        drawH: 0,
         baseSpeed: 430,
         speed: 430,
         vx: 0,
         shield: 0,
         shoesUntil: 0,
         invincibleUntil: 0,
-        blinkUntil: 0
+        blinkUntil: 0,
+        noteUntil: 0
       };
 
       let obstacles = [];
@@ -668,6 +675,7 @@
       let particles = [];
       let floatTexts = [];
 
+      // 저장소와 랭킹
       function readNumber(key, fallback) {
         const raw = Number(localStorage.getItem(key));
         return Number.isFinite(raw) ? raw : fallback;
@@ -700,12 +708,12 @@
           .map(normalizeRecord)
           .filter(item => item.score > 0)
           .sort(compareRecord)
-          .slice(0, 5);
+          .slice(0, LEADERBOARD_LIMIT);
       }
 
       function readTop5() {
         try {
-          return sortTop(JSON.parse(localStorage.getItem(STORAGE_TOP) || '[]'));
+          return sortTop(JSON.parse(localStorage.getItem(STORAGE_KEYS.leaderboard) || '[]'));
         } catch {
           return [];
         }
@@ -713,16 +721,16 @@
 
       function saveLocalTop5(records) {
         top5 = sortTop(records);
-        localStorage.setItem(STORAGE_TOP, JSON.stringify(top5));
+        localStorage.setItem(STORAGE_KEYS.leaderboard, JSON.stringify(top5));
       }
 
       function isSharedEnabled() {
-        return /^https:\/\//.test(FIREBASE_DATABASE_URL.trim());
+        return /^https:\/\//.test(FIREBASE_CONFIG.databaseUrl.trim());
       }
 
       function boardUrl(suffix = '') {
-        const base = FIREBASE_DATABASE_URL.trim().replace(/\/$/, '');
-        const path = FIREBASE_BOARD_PATH.split('/').map(encodeURIComponent).join('/');
+        const base = FIREBASE_CONFIG.databaseUrl.trim().replace(/\/$/, '');
+        const path = FIREBASE_CONFIG.boardPath.split('/').map(encodeURIComponent).join('/');
         return base + '/' + path + suffix;
       }
 
@@ -740,9 +748,9 @@
           top5 = sortTop(records);
           // Firebase 주소가 설정된 경우 화면에는 서버 기록을 기준으로 보여준다.
           // localStorage는 오프라인/임시 캐시로만 저장한다.
-          localStorage.setItem(STORAGE_TOP, JSON.stringify(top5));
+          localStorage.setItem(STORAGE_KEYS.leaderboard, JSON.stringify(top5));
           best = Math.max(best, top5[0] ? top5[0].score : 0);
-          localStorage.setItem(STORAGE_BEST, String(best));
+          localStorage.setItem(STORAGE_KEYS.bestScore, String(best));
           sharedLeaderboardReady = true;
           sharedLeaderboardError = false;
           renderRanking();
@@ -794,14 +802,14 @@
         const data = await res.json();
         if (!data || typeof data !== 'object') return;
         const records = Object.entries(data).map(([id, value]) => ({ ...normalizeRecord(value), id })).sort(compareRecord);
-        const extra = records.slice(20);
+        const extra = records.slice(SERVER_RECORD_LIMIT);
         await Promise.all(extra.map(record => fetch(boardUrl('/' + encodeURIComponent(record.id) + '.json'), { method: 'DELETE' })));
       }
 
       function makeFinalRecord(seconds) {
         const finalScoreValue = Math.round(score);
         best = Math.max(best, finalScoreValue);
-        localStorage.setItem(STORAGE_BEST, String(best));
+        localStorage.setItem(STORAGE_KEYS.bestScore, String(best));
         return {
           name: '익명',
           score: finalScoreValue,
@@ -820,7 +828,7 @@
       async function saveRecordWithName(name) {
         if (!pendingRecord) return;
         const record = { ...pendingRecord, name: normalizeName(name), nearMiss: pendingRecord.near };
-        localStorage.setItem(STORAGE_NAME, record.name);
+        localStorage.setItem(STORAGE_KEYS.playerName, record.name);
         pendingRecord = null;
         nameEntry.classList.remove('show');
 
@@ -840,6 +848,7 @@
         renderRanking();
       }
 
+      // 화면 크기와 게임 생명주기
       function setAppHeight() {
         const vv = window.visualViewport;
         const height = Math.max(320, Math.floor((vv && vv.height) ? vv.height : window.innerHeight));
@@ -883,13 +892,20 @@
         positionPlayer();
       }
 
+      function releaseControls() {
+        leftHeld = false;
+        rightHeld = false;
+        keys.clear();
+        leftBtn.classList.remove('is-pressed');
+        rightBtn.classList.remove('is-pressed');
+      }
+
       function resetGame() {
         elapsed = 0;
         score = 0;
         bonusScore = 0;
         combo = 1;
         nearCount = 0;
-        waveCount = 0;
         lastMilestone = 0;
         nextObstacleAt = 0;
         nextItemAt = 4.5;
@@ -898,11 +914,7 @@
         waveSafetyUntil = 0;
         hiddenAt = 0;
         shake = 0;
-        leftHeld = false;
-        rightHeld = false;
-        keys.clear();
-        leftBtn.classList.remove('is-pressed');
-        rightBtn.classList.remove('is-pressed');
+        releaseControls();
         clearTimeout(toastTimer);
         toast.classList.remove('show');
         obstacles = [];
@@ -928,7 +940,7 @@
         unlockAudio();
         resize();
         resetGame();
-        state = 'playing';
+        state = GAME_STATE.PLAYING;
         startOverlay.classList.add('is-hidden');
         gameOverOverlay.classList.add('is-hidden');
         startTime = performance.now();
@@ -940,8 +952,8 @@
       }
 
       function endGame() {
-        if (state !== 'playing') return;
-        state = 'gameover';
+        if (state !== GAME_STATE.PLAYING) return;
+        state = GAME_STATE.GAME_OVER;
         playTone('whistle');
         shake = Math.max(shake, 18);
         pendingRecord = makeFinalRecord(elapsed);
@@ -955,11 +967,11 @@
         // Firebase가 켜진 경우, 최신 서버 TOP 5를 먼저 불러온 뒤 진입 여부를 판단한다.
         if (isSharedEnabled()) {
           fetchSharedTop5().then(() => {
-            if (state !== 'gameover' || pendingRecord !== finishedRecord) return;
+            if (state !== GAME_STATE.GAME_OVER || pendingRecord !== finishedRecord) return;
             const shouldAskName = isTop5Candidate(finishedRecord);
             if (shouldAskName) {
               nameEntry.classList.add('show');
-              playerNameInput.value = localStorage.getItem(STORAGE_NAME) || '';
+              playerNameInput.value = localStorage.getItem(STORAGE_KEYS.playerName) || '';
               nameEntryTitle.textContent = '🏆 명예의 전당 진입! 이름을 남겨주세요.';
             } else {
               nameEntry.classList.remove('show');
@@ -969,13 +981,13 @@
         const shouldAskName = !isSharedEnabled() && isTop5Candidate(finishedRecord);
         if (shouldAskName) {
           nameEntry.classList.add('show');
-          playerNameInput.value = localStorage.getItem(STORAGE_NAME) || '';
+          playerNameInput.value = localStorage.getItem(STORAGE_KEYS.playerName) || '';
           nameEntryTitle.textContent = '🏆 TOP 5 진입! 이름을 남겨주세요.';
         } else {
           nameEntry.classList.remove('show');
         }
         setTimeout(() => {
-          if (state !== 'gameover' || pendingRecord !== finishedRecord) return;
+          if (state !== GAME_STATE.GAME_OVER || pendingRecord !== finishedRecord) return;
           gameOverOverlay.classList.remove('is-hidden');
           if (shouldAskName) playerNameInput.focus({ preventScroll: true });
         }, 220);
@@ -989,6 +1001,7 @@
         return '너무 이른 탈락입니다. 다시 도전하시죠.';
       }
 
+      // 랭킹 UI
       function renderRanking() {
         rankingEl.innerHTML = '';
         const title = document.createElement('div');
@@ -1001,7 +1014,7 @@
           { name: '-', score: 0, time: 0, near: 0 },
           { name: '-', score: 0, time: 0, near: 0 }
         ];
-        rows.slice(0, 5).forEach((record, index) => {
+        rows.slice(0, LEADERBOARD_LIMIT).forEach((record, index) => {
           const row = document.createElement('div');
           row.className = 'rank-line';
           const medal = ['🥇', '🥈', '🥉', '4위', '5위'][index];
@@ -1011,17 +1024,18 @@
           rankingEl.appendChild(row);
         });
         if (rankNote) {
-          if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹 연결 완료: 현재 표시되는 TOP 5는 Firebase 서버에서 불러온 기록입니다.';
+          if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹 연결 완료: 현재 표시되는 명예의 전당은 Firebase 서버에서 불러온 기록입니다.';
           else if (isSharedEnabled() && sharedLeaderboardError) rankNote.textContent = '공유 랭킹 연결 실패: Firebase 규칙에서 rankings 읽기/쓰기를 허용했는지 확인해 주세요. 지금 보이는 기록은 이 기기 임시 기록입니다.';
           else if (isSharedEnabled()) rankNote.textContent = '공유 랭킹 연결 중...';
           else rankNote.textContent = '현재는 이 기기 안에만 저장됩니다. Firebase 주소를 넣으면 모두에게 공유됩니다.';
         }
       }
 
+      // 메인 루프와 플레이어 이동
       function loop(now) {
         const rawDt = Math.min(0.033, (now - lastTime) / 1000 || 0);
         lastTime = now;
-        if (state === 'playing') {
+        if (state === GAME_STATE.PLAYING) {
           elapsed = (now - startTime) / 1000;
           const slowFactor = isNoteActive() ? 0.54 : 1;
           const dt = rawDt;
@@ -1055,6 +1069,7 @@
         player.x = clamp(player.x, sideRadius, W - sideRadius);
       }
 
+      // 생성 패턴과 난이도
       function updateSpawning() {
         const intensity = getIntensity();
         if (elapsed >= nextWaveAt) {
@@ -1138,7 +1153,6 @@
       }
 
       function spawnWave() {
-        waveCount += 1;
         showToast('띵보님 웨이브! 안전 통로로 빠져나가라', 1200);
         playTone('wave');
         shake = Math.max(shake, 6);
@@ -1150,8 +1164,7 @@
         nextObstacleAt = Math.max(nextObstacleAt, waveSafetyUntil);
         nextBossAt = Math.max(nextBossAt, waveSafetyUntil + 1.5);
 
-        // v2.1 수정: 웨이브는 반드시 피할 수 있는 세로 통로를 만든다.
-        // 기존처럼 랜덤으로 빈틈을 만들면 두 번째 줄이 통로를 막아 억울하게 죽을 수 있었다.
+        // 두 줄이 같은 빈 열을 사용해 끝까지 이어지는 안전 통로를 만든다.
         const count = Math.max(5, Math.min(7, Math.floor(W / 64)));
         const cell = W / count;
         const r = clamp(cell * 0.30, 20, 28);
@@ -1199,6 +1212,7 @@
         });
       }
 
+      // 충돌, 아이템, 점수 이벤트
       function updateObstacles(dt, slowFactor) {
         const now = elapsed;
         const playerHit = getPlayerHitCircle();
@@ -1232,7 +1246,7 @@
 
           if (isCollision) {
             handleHit(ob);
-            if (state !== 'playing') break;
+            if (state !== GAME_STATE.PLAYING) break;
           }
         }
         obstacles = obstacles.filter(ob => ob.y < H + ob.r + 80);
@@ -1352,6 +1366,7 @@
         }
       }
 
+      // 일시 효과와 HUD
       function updateParticles(dt) {
         for (const p of particles) {
           p.x += p.vx * dt;
@@ -1375,7 +1390,6 @@
       function updateHud() {
         timeText.textContent = formatTime(elapsed);
         scoreText.textContent = String(Math.round(score));
-        bestText.textContent = 'BEST ' + Math.round(best) + '점';
         combo = Math.min(5, 1 + Math.floor(elapsed / 18) + Math.floor(nearCount / 8));
         const pills = [];
         if (combo > 1) pills.push(['🔥 COMBO x' + combo, 'red']);
@@ -1386,6 +1400,7 @@
         statusRow.innerHTML = pills.map(([text, color]) => '<span class="pill ' + color + '">' + text + '</span>').join('');
       }
 
+      // 캔버스 렌더링
       function draw() {
         const sx = shake > 0 ? random(-shake, shake) : 0;
         const sy = shake > 0 ? random(-shake, shake) : 0;
@@ -1609,6 +1624,7 @@
         ctx.restore();
       }
 
+      // 시각 효과와 공통 도우미
       function burst(x, y, count, color) {
         for (let i = 0; i < count; i++) {
           const angle = random(0, Math.PI * 2);
@@ -1686,6 +1702,7 @@
         context.closePath();
       }
 
+      // 오디오
       function unlockAudio() {
         if (audioReady) return;
         try {
@@ -1755,6 +1772,7 @@
         osc.stop(start + duration + 0.02);
       }
 
+      // 입력과 브라우저 이벤트
       function bindHoldButton(button, direction) {
         const down = (event) => {
           event.preventDefault();
@@ -1782,7 +1800,7 @@
           unlockAudio();
         }
         keys.add(event.code);
-        if ((event.code === 'Space' || event.code === 'Enter') && state !== 'playing') startGame();
+        if ((event.code === 'Space' || event.code === 'Enter') && state !== GAME_STATE.PLAYING) startGame();
       });
 
       window.addEventListener('keyup', (event) => {
@@ -1792,21 +1810,17 @@
       document.addEventListener('visibilitychange', () => {
         const now = performance.now();
         if (document.hidden) {
-          if (state === 'playing' && !hiddenAt) hiddenAt = now;
-          leftHeld = false;
-          rightHeld = false;
-          keys.clear();
-          leftBtn.classList.remove('is-pressed');
-          rightBtn.classList.remove('is-pressed');
+          if (state === GAME_STATE.PLAYING && !hiddenAt) hiddenAt = now;
+          releaseControls();
         } else if (hiddenAt) {
-          if (state === 'playing') startTime += now - hiddenAt;
+          if (state === GAME_STATE.PLAYING) startTime += now - hiddenAt;
           hiddenAt = 0;
           lastTime = now;
         }
       });
 
       document.addEventListener('touchmove', (event) => {
-        if (state === 'playing') event.preventDefault();
+        if (state === GAME_STATE.PLAYING) event.preventDefault();
       }, { passive: false });
       window.addEventListener('resize', resize);
       if (window.visualViewport) {
@@ -1825,12 +1839,13 @@
       });
       menuBtn.addEventListener('click', () => {
         unlockAudio();
-        state = 'ready';
+        state = GAME_STATE.READY;
         gameOverOverlay.classList.add('is-hidden');
         startOverlay.classList.remove('is-hidden');
         resetGame();
       });
 
+      // 초기 실행
       resize();
       resetGame();
       renderRanking();
