@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#101827" />
   <title>띵보님 피하기</title>
-    <!-- v2.5: shared ranking path/rules fix -->
+    <!-- v2.7: player illustration applied + mobile bottom clipping fix -->
   <style>
     :root {
       --safe-top: env(safe-area-inset-top, 0px);
@@ -15,6 +15,7 @@
       --dark: #0f172a;
       --red: #ef4444;
       --green: #22c55e;
+      --app-height: 100dvh;
     }
 
     * {
@@ -25,7 +26,7 @@
     html,
     body {
       width: 100%;
-      height: 100%;
+      min-height: 100%;
       margin: 0;
       overflow: hidden;
       overscroll-behavior: none;
@@ -37,15 +38,16 @@
     }
 
     body {
-      position: fixed;
-      inset: 0;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
     }
 
     #app {
       position: relative;
-      width: 100vw;
-      height: 100dvh;
-      min-height: 100vh;
+      width: min(100vw, 520px);
+      height: var(--app-height);
+      min-height: 480px;
       max-width: 520px;
       margin: 0 auto;
       overflow: hidden;
@@ -174,7 +176,7 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 14px;
-      padding: 12px 16px calc(14px + var(--safe-bottom));
+      padding: 12px 16px calc(14px + max(var(--safe-bottom), 8px));
       pointer-events: none;
     }
 
@@ -563,6 +565,7 @@
       const STORAGE_TOP = 'ddingboNimAvoidTop5ScoreV23';
       const STORAGE_NAME = 'ddingboNimAvoidPlayerNameV23';
       const IMAGE_PATH = 'assets/hmb.png';
+      const PLAYER_IMAGE_PATH = 'assets/player.png';
 
       // GitHub Pages만으로는 모든 이용자의 랭킹을 저장할 수 없습니다.
       // Firebase Realtime Database를 만든 뒤 아래 주소만 실제 주소로 바꾸면 공유 랭킹이 켜집니다.
@@ -610,6 +613,13 @@
       hmbImg.onload = () => { hmbLoaded = true; };
       hmbImg.onerror = () => { hmbFailed = true; };
       hmbImg.src = IMAGE_PATH;
+
+      const playerImg = new Image();
+      let playerLoaded = false;
+      let playerFailed = false;
+      playerImg.onload = () => { playerLoaded = true; };
+      playerImg.onerror = () => { playerFailed = true; };
+      playerImg.src = PLAYER_IMAGE_PATH;
 
       const player = {
         x: 0,
@@ -694,11 +704,13 @@
           return top5;
         }
         try {
-          const res = await fetch(boardUrl('.json'), { cache: 'no-store' });
-          if (!res.ok) throw new Error('leaderboard fetch failed');
+          const res = await fetch(boardUrl('.json') + '?t=' + Date.now(), { cache: 'no-store' });
+          if (!res.ok) throw new Error('leaderboard fetch failed: ' + res.status);
           const data = await res.json();
           const records = data && typeof data === 'object' ? Object.entries(data).map(([id, value]) => ({ ...value, id })) : [];
           top5 = sortTop(records);
+          // Firebase 주소가 설정된 경우 화면에는 서버 기록을 기준으로 보여준다.
+          // localStorage는 오프라인/임시 캐시로만 저장한다.
           localStorage.setItem(STORAGE_TOP, JSON.stringify(top5));
           best = Math.max(best, top5[0] ? top5[0].score : 0);
           localStorage.setItem(STORAGE_BEST, String(best));
@@ -708,8 +720,10 @@
           updateHud();
           return top5;
         } catch (error) {
+          console.warn('[shared ranking] fetch failed', error);
           sharedLeaderboardReady = false;
           sharedLeaderboardError = true;
+          top5 = readTop5();
           renderRanking();
           return top5;
         }
@@ -718,16 +732,26 @@
       async function submitSharedRecord(record) {
         if (!isSharedEnabled()) return false;
         try {
-          const res = await fetch(boardUrl('.json'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(record)
+          const safeRecord = normalizeRecord({
+            ...record,
+            name: normalizeName(record.name),
+            nearMiss: Math.round(Number(record.near ?? record.nearMiss) || 0),
+            createdAt: Number(record.createdAt) || Date.now()
           });
-          if (!res.ok) throw new Error('leaderboard submit failed');
+          safeRecord.nearMiss = safeRecord.near;
+          const id = String(safeRecord.createdAt) + '_' + Math.random().toString(36).slice(2, 8);
+          const res = await fetch(boardUrl('/' + encodeURIComponent(id) + '.json'), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(safeRecord)
+          });
+          if (!res.ok) throw new Error('leaderboard submit failed: ' + res.status);
           await trimSharedLeaderboard();
           await fetchSharedTop5();
           return true;
         } catch (error) {
+          console.warn('[shared ranking] submit failed', error);
+          sharedLeaderboardReady = false;
           sharedLeaderboardError = true;
           renderRanking();
           return false;
@@ -764,22 +788,56 @@
         return ranked.some(item => item.createdAt === record.createdAt && item.score === record.score);
       }
 
-      function saveRecordWithName(name) {
+      async function saveRecordWithName(name) {
         if (!pendingRecord) return;
         const record = { ...pendingRecord, name: normalizeName(name), nearMiss: pendingRecord.near };
         localStorage.setItem(STORAGE_NAME, record.name);
-        saveLocalTop5(top5.concat(record));
         pendingRecord = null;
         nameEntry.classList.remove('show');
+
+        if (isSharedEnabled()) {
+          toastMessage('공유 랭킹 저장 중...');
+          const ok = await submitSharedRecord(record);
+          if (ok) {
+            toastMessage('서버 랭킹 저장 완료!');
+          } else {
+            saveLocalTop5(readTop5().concat(record));
+            toastMessage('서버 저장 실패: 이 기기에만 임시 저장됨');
+          }
+        } else {
+          saveLocalTop5(top5.concat(record));
+          toastMessage('기기 랭킹 등록 완료!');
+        }
         renderRanking();
-        toastMessage('랭킹 등록 완료!');
-        submitSharedRecord(record).then(ok => {
-          if (ok) toastMessage('공유 랭킹 동기화 완료!');
-          else if (isSharedEnabled()) toastMessage('공유 랭킹 저장 실패: Firebase 설정 확인');
-        });
+      }
+
+      function setAppHeight() {
+        const vv = window.visualViewport;
+        const height = Math.max(480, Math.floor((vv && vv.height) ? vv.height : window.innerHeight));
+        document.documentElement.style.setProperty('--app-height', height + 'px');
+      }
+
+      function getSafeBottom() {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom').trim();
+        const px = parseFloat(raw);
+        return Number.isFinite(px) ? px : 0;
+      }
+
+      function getBottomReserve() {
+        return Math.max(104, 88 + getSafeBottom() + 10);
+      }
+
+      function positionPlayer() {
+        player.drawH = Math.max(92, Math.min(132, W * 0.29));
+        player.drawW = Math.round(player.drawH * (2 / 3));
+        const bottomOffset = getBottomReserve();
+        player.y = H - bottomOffset - player.drawH * 0.20;
+        if (!player.x) player.x = W / 2;
+        player.x = clamp(player.x, player.r + 10, W - player.r - 10);
       }
 
       function resize() {
+        setAppHeight();
         const rect = app.getBoundingClientRect();
         W = Math.max(280, Math.floor(rect.width));
         H = Math.max(480, Math.floor(rect.height));
@@ -789,9 +847,7 @@
         canvas.style.width = W + 'px';
         canvas.style.height = H + 'px';
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        player.y = H - Math.max(116, H * 0.15);
-        if (!player.x) player.x = W / 2;
-        player.x = clamp(player.x, player.r + 8, W - player.r - 8);
+        positionPlayer();
       }
 
       function resetGame() {
@@ -815,14 +871,15 @@
         pendingRecord = null;
         nameEntry.classList.remove('show');
         player.x = W / 2;
-        player.y = H - Math.max(116, H * 0.15);
-        player.r = Math.max(20, Math.min(25, W * 0.052));
+        player.r = Math.max(18, Math.min(24, W * 0.05));
+        positionPlayer();
         player.speed = player.baseSpeed;
         player.vx = 0;
         player.shield = 0;
         player.shoesUntil = 0;
         player.invincibleUntil = 0;
         player.blinkUntil = 0;
+        player.noteUntil = 0;
         updateHud();
       }
 
@@ -852,7 +909,20 @@
         finalBest.textContent = Math.round(best) + '점';
         endingText.textContent = getEndingText(elapsed);
         renderRanking();
-        const shouldAskName = isTop5Candidate(pendingRecord);
+        // Firebase가 켜진 경우, 최신 서버 TOP 5를 먼저 불러온 뒤 진입 여부를 판단한다.
+        if (isSharedEnabled()) {
+          fetchSharedTop5().then(() => {
+            const shouldAskName = isTop5Candidate(pendingRecord);
+            if (shouldAskName) {
+              nameEntry.classList.add('show');
+              playerNameInput.value = localStorage.getItem(STORAGE_NAME) || '';
+              nameEntryTitle.textContent = '🏆 공유 TOP 5 진입! 이름을 남겨주세요.';
+            } else {
+              nameEntry.classList.remove('show');
+            }
+          });
+        }
+        const shouldAskName = !isSharedEnabled() && isTop5Candidate(pendingRecord);
         if (shouldAskName) {
           nameEntry.classList.add('show');
           playerNameInput.value = localStorage.getItem(STORAGE_NAME) || '';
@@ -896,7 +966,7 @@
           rankingEl.appendChild(row);
         });
         if (rankNote) {
-          if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹 연결 완료: GitHub 링크 접속자 모두에게 같은 TOP 5가 보입니다.';
+          if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹 연결 완료: 현재 표시되는 TOP 5는 Firebase 서버에서 불러온 기록입니다.';
           else if (isSharedEnabled() && sharedLeaderboardError) rankNote.textContent = '공유 랭킹 연결 실패: Firebase 규칙에서 rankings 읽기/쓰기를 허용했는지 확인해 주세요. 지금 보이는 기록은 이 기기 임시 기록입니다.';
           else rankNote.textContent = '현재는 이 기기 안에만 저장됩니다. Firebase 주소를 넣으면 모두에게 공유됩니다.';
         }
@@ -1361,51 +1431,60 @@
         if (blink) return;
         ctx.save();
         ctx.translate(player.x, player.y);
+
         if (isShoesActive()) {
           ctx.globalAlpha = 0.22;
           ctx.fillStyle = '#86efac';
           for (let i = 1; i <= 3; i++) {
             ctx.beginPath();
-            ctx.arc(-i * 13 * Math.sign(player.vx || 1), 5, player.r + i * 3, 0, Math.PI * 2);
+            ctx.ellipse(-i * 16 * Math.sign(player.vx || 1), 20, player.r + i * 5, player.r * 0.7 + i * 3, 0, 0, Math.PI * 2);
             ctx.fill();
           }
           ctx.globalAlpha = 1;
         }
+
         if (player.shield > 0) {
           ctx.strokeStyle = 'rgba(147,197,253,.95)';
           ctx.lineWidth = 5;
           ctx.beginPath();
-          ctx.arc(0, 0, player.r + 13 + Math.sin(elapsed * 8) * 2, 0, Math.PI * 2);
+          ctx.arc(0, -player.drawH * 0.18, player.r + 18 + Math.sin(elapsed * 8) * 2, 0, Math.PI * 2);
           ctx.stroke();
         }
+
         ctx.shadowColor = 'rgba(0,0,0,.30)';
         ctx.shadowBlur = 14;
         ctx.shadowOffsetY = 8;
-        ctx.fillStyle = '#facc15';
-        roundRect(ctx, -player.r * 0.9, -player.r * 1.1, player.r * 1.8, player.r * 2.15, 12);
-        ctx.fill();
-        ctx.fillStyle = '#2563eb';
-        roundRect(ctx, -player.r * 0.72, -player.r * 0.08, player.r * 1.44, player.r * 1.05, 9);
-        ctx.fill();
-        ctx.fillStyle = '#fde68a';
-        ctx.beginPath();
-        ctx.arc(0, -player.r * 0.58, player.r * 0.58, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#111827';
-        ctx.beginPath();
-        ctx.arc(-player.r * 0.18, -player.r * 0.62, 2.2, 0, Math.PI * 2);
-        ctx.arc(player.r * 0.18, -player.r * 0.62, 2.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#111827';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, -player.r * 0.48, player.r * 0.22, 0, Math.PI);
-        ctx.stroke();
-        ctx.fillStyle = '#fff';
-        ctx.font = '900 ' + Math.floor(player.r * 0.52) + 'px system-ui';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('K', 0, player.r * 0.43);
+
+        if (playerLoaded && !playerFailed) {
+          ctx.drawImage(playerImg, -player.drawW / 2, -player.drawH * 0.82, player.drawW, player.drawH);
+        } else {
+          ctx.fillStyle = '#facc15';
+          roundRect(ctx, -player.r * 0.9, -player.r * 1.1, player.r * 1.8, player.r * 2.15, 12);
+          ctx.fill();
+          ctx.fillStyle = '#2563eb';
+          roundRect(ctx, -player.r * 0.72, -player.r * 0.08, player.r * 1.44, player.r * 1.05, 9);
+          ctx.fill();
+          ctx.fillStyle = '#fde68a';
+          ctx.beginPath();
+          ctx.arc(0, -player.r * 0.58, player.r * 0.58, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#111827';
+          ctx.beginPath();
+          ctx.arc(-player.r * 0.18, -player.r * 0.62, 2.2, 0, Math.PI * 2);
+          ctx.arc(player.r * 0.18, -player.r * 0.62, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#111827';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, -player.r * 0.48, player.r * 0.22, 0, Math.PI);
+          ctx.stroke();
+          ctx.fillStyle = '#fff';
+          ctx.font = '900 ' + Math.floor(player.r * 0.52) + 'px system-ui';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('K', 0, player.r * 0.43);
+        }
+
         ctx.restore();
       }
 
@@ -1664,6 +1743,10 @@
 
       document.addEventListener('touchmove', (event) => event.preventDefault(), { passive: false });
       window.addEventListener('resize', resize);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', resize);
+        window.visualViewport.addEventListener('scroll', resize);
+      }
       window.addEventListener('orientationchange', () => setTimeout(resize, 160));
 
       bindHoldButton(leftBtn, -1);
