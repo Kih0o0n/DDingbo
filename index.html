@@ -859,13 +859,14 @@
       }
 
       function positionPlayer() {
-        const minDrawH = H < 520 ? 78 : 92;
-        player.drawH = Math.max(minDrawH, Math.min(132, W * 0.29));
+        const minDrawH = H < 520 ? 39 : 46;
+        player.drawH = Math.max(minDrawH, Math.min(66, W * 0.145));
         player.drawW = Math.round(player.drawH * (2 / 3));
         const bottomOffset = getBottomReserve();
         player.y = H - bottomOffset - player.drawH * 0.20;
         if (!player.x) player.x = W / 2;
-        player.x = clamp(player.x, player.r + 10, W - player.r - 10);
+        const sideRadius = getPlayerHorizontalRadius();
+        player.x = clamp(player.x, sideRadius, W - sideRadius);
       }
 
       function resize() {
@@ -911,7 +912,7 @@
         pendingRecord = null;
         nameEntry.classList.remove('show');
         player.x = W / 2;
-        player.r = Math.max(18, Math.min(24, W * 0.05));
+        player.r = Math.max(9, Math.min(12, W * 0.025));
         positionPlayer();
         player.speed = player.baseSpeed;
         player.vx = 0;
@@ -959,7 +960,7 @@
             if (shouldAskName) {
               nameEntry.classList.add('show');
               playerNameInput.value = localStorage.getItem(STORAGE_NAME) || '';
-              nameEntryTitle.textContent = '🏆 공유 TOP 5 진입! 이름을 남겨주세요.';
+              nameEntryTitle.textContent = '🏆 명예의 전당 진입! 이름을 남겨주세요.';
             } else {
               nameEntry.classList.remove('show');
             }
@@ -992,7 +993,7 @@
         rankingEl.innerHTML = '';
         const title = document.createElement('div');
         title.className = 'rank-line';
-        const label = isSharedEnabled() ? '🌐 공유 TOP 5' : '🏆 기기 TOP 5';
+        const label = isSharedEnabled() ? '🏆 명예의 전당' : '🏆 기기 TOP 5';
         title.innerHTML = '<span>' + label + '</span><span>이름 / 점수</span>';
         rankingEl.appendChild(title);
         const rows = top5.length ? top5 : [
@@ -1050,7 +1051,8 @@
         if (dir !== 0) {
           player.x += dir * player.speed * dt;
         }
-        player.x = clamp(player.x, player.r + 8, W - player.r - 8);
+        const sideRadius = getPlayerHorizontalRadius();
+        player.x = clamp(player.x, sideRadius, W - sideRadius);
       }
 
       function updateSpawning() {
@@ -1217,7 +1219,8 @@
           if (ob.x < ob.r) { ob.x = ob.r; ob.vx = Math.abs(ob.vx) * 0.75; ob.baseX = ob.x; }
           if (ob.x > W - ob.r) { ob.x = W - ob.r; ob.vx = -Math.abs(ob.vx) * 0.75; ob.baseX = ob.x; }
 
-          if (!ob.nearScored && ob.y > playerHit.y - ob.r && ob.y < playerHit.y + playerHit.r * 2.4) {
+          const isCollision = collidesObstacle(ob);
+          if (!isCollision && !ob.nearScored && ob.y > playerHit.y - ob.r && ob.y < playerHit.y + playerHit.r * 2.4) {
             const dist = Math.hypot(ob.x - playerHit.x, ob.y - playerHit.y);
             const nearBand = ob.hitRadius + playerHit.r + 24;
             const hitBand = ob.hitRadius + playerHit.r;
@@ -1227,7 +1230,7 @@
             }
           }
 
-          if (collidesObstacle(ob)) {
+          if (isCollision) {
             handleHit(ob);
             if (state !== 'playing') break;
           }
@@ -1238,16 +1241,38 @@
       function getPlayerHitCircle() {
         return {
           x: player.x,
-          y: player.y - player.drawH * 0.25,
-          r: player.r * 0.76
+          y: player.y - player.drawH * 0.32,
+          r: Math.max(player.drawW * 0.38, player.drawH * 0.22)
         };
+      }
+
+      function getPlayerHorizontalRadius() {
+        return Math.max(player.r + 4, player.drawW * 0.45 + 3);
+      }
+
+      function getPlayerHitEllipses() {
+        const top = player.y - player.drawH * 0.82;
+        const w = player.drawW;
+        const h = player.drawH;
+        return [
+          { x: player.x, y: top + h * 0.26, rx: w * 0.43, ry: h * 0.19 },
+          { x: player.x, y: top + h * 0.50, rx: w * 0.26, ry: h * 0.25 },
+          { x: player.x - w * 0.16, y: top + h * 0.73, rx: w * 0.14, ry: h * 0.25 },
+          { x: player.x + w * 0.16, y: top + h * 0.73, rx: w * 0.14, ry: h * 0.25 }
+        ];
+      }
+
+      function circleIntersectsEllipse(cx, cy, radius, ellipse) {
+        const dx = (cx - ellipse.x) / (ellipse.rx + radius);
+        const dy = (cy - ellipse.y) / (ellipse.ry + radius);
+        return dx * dx + dy * dy < 1;
       }
 
       function collidesObstacle(ob) {
         if (elapsed < player.invincibleUntil) return false;
-        const hit = getPlayerHitCircle();
-        const dist = Math.hypot(ob.x - hit.x, ob.y - hit.y);
-        return dist < ob.hitRadius + hit.r;
+        return getPlayerHitEllipses().some(ellipse =>
+          circleIntersectsEllipse(ob.x, ob.y, ob.hitRadius, ellipse)
+        );
       }
 
       function handleHit(ob) {
