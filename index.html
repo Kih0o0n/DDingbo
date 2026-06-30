@@ -30,7 +30,7 @@
       margin: 0;
       overflow: hidden;
       overscroll-behavior: none;
-      touch-action: none;
+      touch-action: manipulation;
       user-select: none;
       -webkit-user-select: none;
       background: #020617;
@@ -47,7 +47,7 @@
       position: relative;
       width: min(100vw, 520px);
       height: var(--app-height);
-      min-height: 480px;
+      min-height: 320px;
       max-width: 520px;
       margin: 0 auto;
       overflow: hidden;
@@ -218,6 +218,10 @@
 
     .card {
       width: min(92vw, 420px);
+      max-height: calc(var(--app-height) - 24px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
       border-radius: 32px;
       padding: 24px 20px 20px;
       color: #111827;
@@ -417,6 +421,7 @@
     }
 
     .rank-note {
+      margin-top: 8px;
       font-size: 11px;
       color: #64748b;
       font-weight: 800;
@@ -453,6 +458,30 @@
       .controls { padding-left: 24px; padding-right: 24px; }
       .control-btn { height: 70px; }
     }
+
+    @media (orientation: landscape) and (max-height: 520px) {
+      .hud { top: calc(5px + var(--safe-top)); left: 8px; right: 8px; gap: 5px; }
+      .panel { padding: 6px 9px; border-radius: 14px; }
+      .title-small { font-size: 10px; margin-bottom: 2px; }
+      #timeText, #scoreText { font-size: 24px; }
+      #bestText { min-width: 72px; padding: 7px 8px; }
+      .status-row { min-height: 0; gap: 4px; }
+      .pill { padding: 4px 7px; font-size: 10px; }
+      .controls { gap: 10px; padding: 6px 12px calc(7px + max(var(--safe-bottom), 4px)); }
+      .control-btn { height: 54px; border-radius: 20px; font-size: 27px; }
+      .overlay { padding: 8px; }
+      .card { max-height: calc(var(--app-height) - 16px); padding: 14px 14px 12px; border-radius: 22px; }
+      .badge { padding: 5px 8px; margin-bottom: 5px; }
+      h1 { font-size: 30px; }
+      .subtitle { margin-top: 6px; font-size: 13px; }
+      .tips { gap: 5px; margin: 8px 0 10px; }
+      .tip { padding: 7px; font-size: 11px; }
+      .primary-btn, .secondary-btn { padding: 10px 14px; font-size: 15px; }
+      .result-box { margin: 8px 0; padding: 8px; }
+      .result-stat { padding: 7px 5px; }
+      .ranking { margin-top: 6px; gap: 3px; }
+      .rank-line { padding: 4px 7px; font-size: 11px; }
+    }
   </style>
 </head>
 <body>
@@ -485,7 +514,7 @@
         <h1>띵보님 피하기</h1>
         <p class="subtitle">32강은 못 갔지만…<br />너는 살아남아라.</p>
         <div class="tips">
-          <div class="tip">👆 화면을 드래그하면 캐릭터가 따라옵니다.</div>
+          <div class="tip">👈 아래 ◀ ▶ 버튼을 길게 눌러 움직이세요.</div>
           <div class="tip">👟 축구화는 잠깐 더 빠르게 움직입니다.</div>
           <div class="tip">📺 VAR는 한 번 충돌을 무효 처리합니다.</div>
           <div class="tip">⚠️ 가까스로 피하면 랭킹 점수가 크게 올라갑니다!</div>
@@ -522,8 +551,8 @@
               <input id="playerNameInput" type="text" maxlength="10" inputmode="text" autocomplete="nickname" placeholder="이름 입력" />
               <button id="saveNameBtn" type="button">등록</button>
             </div>
-            <div id="rankNote" class="rank-note">Firebase 주소를 넣으면 GitHub 링크로 들어온 사람들과 랭킹이 공유됩니다.</div>
           </div>
+          <div id="rankNote" class="rank-note">공유 랭킹 연결 중...</div>
         </div>
         <button id="restartBtn" class="primary-btn" type="button">다시 도전</button>
         <button id="menuBtn" class="secondary-btn" type="button">처음 화면</button>
@@ -580,6 +609,7 @@
       let state = 'ready';
       let lastTime = 0;
       let startTime = 0;
+      let hiddenAt = 0;
       let elapsed = 0;
       let score = 0;
       let bonusScore = 0;
@@ -597,12 +627,11 @@
       let nextItemAt = 0;
       let nextWaveAt = 22;
       let nextBossAt = 38;
+      let waveSafetyUntil = 0;
       let shake = 0;
-      let targetX = null;
       let leftHeld = false;
       let rightHeld = false;
       let keys = new Set();
-      let dragPointerId = null;
       let toastTimer = 0;
       let combo = 1;
       let nearCount = 0;
@@ -796,24 +825,24 @@
         nameEntry.classList.remove('show');
 
         if (isSharedEnabled()) {
-          toastMessage('공유 랭킹 저장 중...');
+          showToast('공유 랭킹 저장 중...', 1200);
           const ok = await submitSharedRecord(record);
           if (ok) {
-            toastMessage('서버 랭킹 저장 완료!');
+            showToast('서버 랭킹 저장 완료!', 1200);
           } else {
             saveLocalTop5(readTop5().concat(record));
-            toastMessage('서버 저장 실패: 이 기기에만 임시 저장됨');
+            showToast('서버 저장 실패: 이 기기에만 임시 저장됨', 1800);
           }
         } else {
           saveLocalTop5(top5.concat(record));
-          toastMessage('기기 랭킹 등록 완료!');
+          showToast('기기 랭킹 등록 완료!', 1200);
         }
         renderRanking();
       }
 
       function setAppHeight() {
         const vv = window.visualViewport;
-        const height = Math.max(480, Math.floor((vv && vv.height) ? vv.height : window.innerHeight));
+        const height = Math.max(320, Math.floor((vv && vv.height) ? vv.height : window.innerHeight));
         document.documentElement.style.setProperty('--app-height', height + 'px');
       }
 
@@ -824,11 +853,14 @@
       }
 
       function getBottomReserve() {
-        return Math.max(104, 88 + getSafeBottom() + 10);
+        const safeBottom = getSafeBottom();
+        if (H < 520) return Math.max(72, 67 + safeBottom);
+        return Math.max(104, 98 + safeBottom);
       }
 
       function positionPlayer() {
-        player.drawH = Math.max(92, Math.min(132, W * 0.29));
+        const minDrawH = H < 520 ? 78 : 92;
+        player.drawH = Math.max(minDrawH, Math.min(132, W * 0.29));
         player.drawW = Math.round(player.drawH * (2 / 3));
         const bottomOffset = getBottomReserve();
         player.y = H - bottomOffset - player.drawH * 0.20;
@@ -840,7 +872,7 @@
         setAppHeight();
         const rect = app.getBoundingClientRect();
         W = Math.max(280, Math.floor(rect.width));
-        H = Math.max(480, Math.floor(rect.height));
+        H = Math.max(320, Math.floor(rect.height));
         dpr = Math.min(window.devicePixelRatio || 1, DPR_LIMIT);
         canvas.width = Math.floor(W * dpr);
         canvas.height = Math.floor(H * dpr);
@@ -862,8 +894,16 @@
         nextItemAt = 4.5;
         nextWaveAt = 22;
         nextBossAt = 38;
+        waveSafetyUntil = 0;
+        hiddenAt = 0;
         shake = 0;
-        targetX = null;
+        leftHeld = false;
+        rightHeld = false;
+        keys.clear();
+        leftBtn.classList.remove('is-pressed');
+        rightBtn.classList.remove('is-pressed');
+        clearTimeout(toastTimer);
+        toast.classList.remove('show');
         obstacles = [];
         items = [];
         particles = [];
@@ -892,6 +932,7 @@
         gameOverOverlay.classList.add('is-hidden');
         startTime = performance.now();
         lastTime = startTime;
+        hiddenAt = 0;
         playTone('start');
         cancelAnimationFrame(animationId);
         animationId = requestAnimationFrame(loop);
@@ -903,6 +944,7 @@
         playTone('whistle');
         shake = Math.max(shake, 18);
         pendingRecord = makeFinalRecord(elapsed);
+        const finishedRecord = pendingRecord;
         updateHud();
         finalScore.textContent = Math.round(score) + '점';
         finalTime.textContent = formatTime(elapsed) + '초';
@@ -912,7 +954,8 @@
         // Firebase가 켜진 경우, 최신 서버 TOP 5를 먼저 불러온 뒤 진입 여부를 판단한다.
         if (isSharedEnabled()) {
           fetchSharedTop5().then(() => {
-            const shouldAskName = isTop5Candidate(pendingRecord);
+            if (state !== 'gameover' || pendingRecord !== finishedRecord) return;
+            const shouldAskName = isTop5Candidate(finishedRecord);
             if (shouldAskName) {
               nameEntry.classList.add('show');
               playerNameInput.value = localStorage.getItem(STORAGE_NAME) || '';
@@ -922,7 +965,7 @@
             }
           });
         }
-        const shouldAskName = !isSharedEnabled() && isTop5Candidate(pendingRecord);
+        const shouldAskName = !isSharedEnabled() && isTop5Candidate(finishedRecord);
         if (shouldAskName) {
           nameEntry.classList.add('show');
           playerNameInput.value = localStorage.getItem(STORAGE_NAME) || '';
@@ -931,6 +974,7 @@
           nameEntry.classList.remove('show');
         }
         setTimeout(() => {
+          if (state !== 'gameover' || pendingRecord !== finishedRecord) return;
           gameOverOverlay.classList.remove('is-hidden');
           if (shouldAskName) playerNameInput.focus({ preventScroll: true });
         }, 220);
@@ -968,6 +1012,7 @@
         if (rankNote) {
           if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹 연결 완료: 현재 표시되는 TOP 5는 Firebase 서버에서 불러온 기록입니다.';
           else if (isSharedEnabled() && sharedLeaderboardError) rankNote.textContent = '공유 랭킹 연결 실패: Firebase 규칙에서 rankings 읽기/쓰기를 허용했는지 확인해 주세요. 지금 보이는 기록은 이 기기 임시 기록입니다.';
+          else if (isSharedEnabled()) rankNote.textContent = '공유 랭킹 연결 중...';
           else rankNote.textContent = '현재는 이 기기 안에만 저장됩니다. Firebase 주소를 넣으면 모두에게 공유됩니다.';
         }
       }
@@ -1002,12 +1047,7 @@
         let dir = 0;
         if (leftHeld || keys.has('ArrowLeft') || keys.has('KeyA')) dir -= 1;
         if (rightHeld || keys.has('ArrowRight') || keys.has('KeyD')) dir += 1;
-        if (targetX !== null) {
-          const dx = targetX - player.x;
-          if (Math.abs(dx) > 2) {
-            player.x += clamp(dx * 12, -player.speed * 1.25, player.speed * 1.25) * dt;
-          }
-        } else if (dir !== 0) {
+        if (dir !== 0) {
           player.x += dir * player.speed * dt;
         }
         player.x = clamp(player.x, player.r + 8, W - player.r - 8);
@@ -1015,7 +1055,11 @@
 
       function updateSpawning() {
         const intensity = getIntensity();
-        if (elapsed >= nextObstacleAt) {
+        if (elapsed >= nextWaveAt) {
+          spawnWave();
+          nextWaveAt = elapsed + random(25, 32);
+        }
+        if (elapsed >= nextObstacleAt && elapsed >= waveSafetyUntil) {
           spawnObstacleRandom();
           const baseGap = lerp(0.78, 0.36, intensity);
           nextObstacleAt = elapsed + random(baseGap * 0.72, baseGap * 1.18);
@@ -1024,11 +1068,7 @@
           spawnItem();
           nextItemAt = elapsed + random(9, 15);
         }
-        if (elapsed >= nextWaveAt) {
-          spawnWave();
-          nextWaveAt = elapsed + random(25, 32);
-        }
-        if (elapsed >= nextBossAt) {
+        if (elapsed >= nextBossAt && elapsed >= waveSafetyUntil) {
           spawnBoss();
           nextBossAt = elapsed + random(38, 48);
         }
@@ -1101,6 +1141,13 @@
         playTone('wave');
         shake = Math.max(shake, 6);
 
+        // 웨이브가 도착할 때 기존 랜덤 장애물이 통로를 막지 않도록 경기장을 정리하고,
+        // 두 줄이 플레이어를 통과할 때까지 일반 장애물과 보스 생성을 잠시 멈춘다.
+        obstacles = obstacles.filter(ob => ob.y > player.y + ob.r);
+        waveSafetyUntil = elapsed + Math.max(5.2, (player.y + 190) / 165);
+        nextObstacleAt = Math.max(nextObstacleAt, waveSafetyUntil);
+        nextBossAt = Math.max(nextBossAt, waveSafetyUntil + 1.5);
+
         // v2.1 수정: 웨이브는 반드시 피할 수 있는 세로 통로를 만든다.
         // 기존처럼 랜덤으로 빈틈을 만들면 두 번째 줄이 통로를 막아 억울하게 죽을 수 있었다.
         const count = Math.max(5, Math.min(7, Math.floor(W / 64)));
@@ -1152,6 +1199,7 @@
 
       function updateObstacles(dt, slowFactor) {
         const now = elapsed;
+        const playerHit = getPlayerHitCircle();
         for (const ob of obstacles) {
           const localAge = now - ob.born;
           if (ob.type === 'chaser') {
@@ -1169,10 +1217,10 @@
           if (ob.x < ob.r) { ob.x = ob.r; ob.vx = Math.abs(ob.vx) * 0.75; ob.baseX = ob.x; }
           if (ob.x > W - ob.r) { ob.x = W - ob.r; ob.vx = -Math.abs(ob.vx) * 0.75; ob.baseX = ob.x; }
 
-          if (!ob.nearScored && ob.y > player.y - ob.r && ob.y < player.y + player.r * 2.4) {
-            const dist = Math.hypot(ob.x - player.x, ob.y - player.y);
-            const nearBand = ob.hitRadius + player.r + 24;
-            const hitBand = ob.hitRadius + player.r * 0.74;
+          if (!ob.nearScored && ob.y > playerHit.y - ob.r && ob.y < playerHit.y + playerHit.r * 2.4) {
+            const dist = Math.hypot(ob.x - playerHit.x, ob.y - playerHit.y);
+            const nearBand = ob.hitRadius + playerHit.r + 24;
+            const hitBand = ob.hitRadius + playerHit.r;
             if (dist < nearBand && dist > hitBand) {
               ob.nearScored = true;
               nearMiss(ob.x, ob.y);
@@ -1187,10 +1235,19 @@
         obstacles = obstacles.filter(ob => ob.y < H + ob.r + 80);
       }
 
+      function getPlayerHitCircle() {
+        return {
+          x: player.x,
+          y: player.y - player.drawH * 0.25,
+          r: player.r * 0.76
+        };
+      }
+
       function collidesObstacle(ob) {
         if (elapsed < player.invincibleUntil) return false;
-        const dist = Math.hypot(ob.x - player.x, ob.y - player.y);
-        return dist < ob.hitRadius + player.r * 0.76;
+        const hit = getPlayerHitCircle();
+        const dist = Math.hypot(ob.x - hit.x, ob.y - hit.y);
+        return dist < ob.hitRadius + hit.r;
       }
 
       function handleHit(ob) {
@@ -1205,7 +1262,8 @@
           obstacles = obstacles.filter(item => item !== ob);
           return;
         }
-        burst(player.x, player.y, 32, '#fca5a5');
+        const hit = getPlayerHitCircle();
+        burst(hit.x, hit.y, 32, '#fca5a5');
         endGame();
       }
 
@@ -1221,11 +1279,12 @@
       }
 
       function updateItems(dt) {
+        const playerHit = getPlayerHitCircle();
         for (const item of items) {
           item.y += item.vy * dt;
           item.rot += item.spin * dt;
-          const dist = Math.hypot(item.x - player.x, item.y - player.y);
-          if (dist < item.r + player.r + 4) {
+          const dist = Math.hypot(item.x - playerHit.x, item.y - playerHit.y);
+          if (dist < item.r + playerHit.r + 8) {
             collectItem(item);
             item.collected = true;
           }
@@ -1671,16 +1730,10 @@
         osc.stop(start + duration + 0.02);
       }
 
-      function pointerX(event) {
-        const rect = canvas.getBoundingClientRect();
-        return clamp(event.clientX - rect.left, player.r + 8, W - player.r - 8);
-      }
-
       function bindHoldButton(button, direction) {
         const down = (event) => {
           event.preventDefault();
           unlockAudio();
-          targetX = null;
           if (direction < 0) leftHeld = true;
           if (direction > 0) rightHeld = true;
           button.classList.add('is-pressed');
@@ -1698,36 +1751,6 @@
         button.addEventListener('pointerleave', up, { passive: false });
       }
 
-      canvas.addEventListener('pointerdown', (event) => {
-        if (state !== 'playing') return;
-        event.preventDefault();
-        unlockAudio();
-        dragPointerId = event.pointerId;
-        targetX = pointerX(event);
-        try { canvas.setPointerCapture(event.pointerId); } catch {}
-      }, { passive: false });
-
-      canvas.addEventListener('pointermove', (event) => {
-        if (state !== 'playing' || dragPointerId !== event.pointerId) return;
-        event.preventDefault();
-        targetX = pointerX(event);
-      }, { passive: false });
-
-      canvas.addEventListener('pointerup', (event) => {
-        if (dragPointerId === event.pointerId) {
-          event.preventDefault();
-          dragPointerId = null;
-          targetX = null;
-        }
-      }, { passive: false });
-
-      canvas.addEventListener('pointercancel', (event) => {
-        if (dragPointerId === event.pointerId) {
-          dragPointerId = null;
-          targetX = null;
-        }
-      }, { passive: false });
-
       window.addEventListener('keydown', (event) => {
         if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space', 'Enter'].includes(event.code)) {
           event.preventDefault();
@@ -1741,7 +1764,25 @@
         keys.delete(event.code);
       });
 
-      document.addEventListener('touchmove', (event) => event.preventDefault(), { passive: false });
+      document.addEventListener('visibilitychange', () => {
+        const now = performance.now();
+        if (document.hidden) {
+          if (state === 'playing' && !hiddenAt) hiddenAt = now;
+          leftHeld = false;
+          rightHeld = false;
+          keys.clear();
+          leftBtn.classList.remove('is-pressed');
+          rightBtn.classList.remove('is-pressed');
+        } else if (hiddenAt) {
+          if (state === 'playing') startTime += now - hiddenAt;
+          hiddenAt = 0;
+          lastTime = now;
+        }
+      });
+
+      document.addEventListener('touchmove', (event) => {
+        if (state === 'playing') event.preventDefault();
+      }, { passive: false });
       window.addEventListener('resize', resize);
       if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', resize);
