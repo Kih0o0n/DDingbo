@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#101827" />
   <title>띵보님 피하기</title>
+    <!-- v2.5: shared ranking path/rules fix -->
   <style>
     :root {
       --safe-top: env(safe-area-inset-top, 0px);
@@ -567,7 +568,7 @@
       // Firebase Realtime Database를 만든 뒤 아래 주소만 실제 주소로 바꾸면 공유 랭킹이 켜집니다.
       // 예: const FIREBASE_DATABASE_URL = 'https://your-project-id-default-rtdb.asia-southeast1.firebasedatabase.app';
       const FIREBASE_DATABASE_URL = 'https://ddingbo-rank-default-rtdb.asia-southeast1.firebasedatabase.app';
-      const FIREBASE_BOARD_PATH = 'ddingbo-nim-avoid/top5';
+      const FIREBASE_BOARD_PATH = 'rankings';
       const DPR_LIMIT = 2;
 
       let W = 0;
@@ -646,7 +647,7 @@
           name: normalizeName(item && item.name),
           score: Math.round(Number(item && item.score) || 0),
           time: Number(item && item.time) || 0,
-          near: Math.round(Number(item && item.near) || 0),
+          near: Math.round(Number(item && (item.near ?? item.nearMiss)) || 0),
           createdAt: Number(item && item.createdAt) || Date.now()
         };
       }
@@ -753,6 +754,7 @@
           score: finalScoreValue,
           time: seconds,
           near: nearCount,
+          nearMiss: nearCount,
           createdAt: Date.now()
         };
       }
@@ -764,7 +766,7 @@
 
       function saveRecordWithName(name) {
         if (!pendingRecord) return;
-        const record = { ...pendingRecord, name: normalizeName(name) };
+        const record = { ...pendingRecord, name: normalizeName(name), nearMiss: pendingRecord.near };
         localStorage.setItem(STORAGE_NAME, record.name);
         saveLocalTop5(top5.concat(record));
         pendingRecord = null;
@@ -894,8 +896,8 @@
           rankingEl.appendChild(row);
         });
         if (rankNote) {
-          if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹이 켜져 있습니다. GitHub 링크 접속자 모두에게 같은 TOP 5가 보입니다.';
-          else if (isSharedEnabled() && sharedLeaderboardError) rankNote.textContent = '공유 랭킹 연결에 실패했습니다. Firebase 주소와 규칙을 확인해 주세요.';
+          if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹 연결 완료: GitHub 링크 접속자 모두에게 같은 TOP 5가 보입니다.';
+          else if (isSharedEnabled() && sharedLeaderboardError) rankNote.textContent = '공유 랭킹 연결 실패: Firebase 규칙에서 rankings 읽기/쓰기를 허용했는지 확인해 주세요. 지금 보이는 기록은 이 기기 임시 기록입니다.';
           else rankNote.textContent = '현재는 이 기기 안에만 저장됩니다. Firebase 주소를 넣으면 모두에게 공유됩니다.';
         }
       }
