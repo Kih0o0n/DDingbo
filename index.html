@@ -297,6 +297,10 @@
       background: #0f172a;
     }
 
+    #leaderboardBtn {
+      margin-top: 18px;
+    }
+
     /* 결과와 랭킹 */
     .result-box {
       margin: 16px 0 12px;
@@ -479,7 +483,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.5: start hall of fame + safe wave corridor -->
+    <!-- v1.2.5-hotfix: reliable start button + start button spacing -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -1920,23 +1924,43 @@
       }
       window.addEventListener('orientationchange', () => setTimeout(resize, 160));
 
-      bindHoldButton(leftBtn, -1);
-      bindHoldButton(rightBtn, 1);
-      startBtn.addEventListener('click', startGame);
-      leaderboardBtn.addEventListener('click', async () => {
+      function bindActionButton(button, handler) {
+        if (!button) return;
+        let lastRunAt = 0;
+        const run = (event) => {
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          const now = performance.now();
+          if (now - lastRunAt < 320) return;
+          lastRunAt = now;
+          handler(event);
+        };
+        button.addEventListener('pointerup', run, { passive: false });
+        button.addEventListener('click', run, { passive: false });
+      }
+
+      async function openLeaderboard() {
         unlockAudio();
         renderRanking(leaderboardRankingEl, leaderboardNote);
         startOverlay.classList.add('is-hidden');
+        gameOverOverlay.classList.add('is-hidden');
         leaderboardOverlay.classList.remove('is-hidden');
         await fetchSharedTop5();
         renderRanking(leaderboardRankingEl, leaderboardNote);
-      });
-      leaderboardCloseBtn.addEventListener('click', () => {
+      }
+
+      bindHoldButton(leftBtn, -1);
+      bindHoldButton(rightBtn, 1);
+      bindActionButton(startBtn, startGame);
+      bindActionButton(leaderboardBtn, openLeaderboard);
+      bindActionButton(leaderboardCloseBtn, () => {
         leaderboardOverlay.classList.add('is-hidden');
         startOverlay.classList.remove('is-hidden');
       });
-      restartBtn.addEventListener('click', startGame);
-      saveNameBtn.addEventListener('click', () => saveRecordWithName(playerNameInput.value));
+      bindActionButton(restartBtn, startGame);
+      bindActionButton(saveNameBtn, () => saveRecordWithName(playerNameInput.value));
       playerNameInput.addEventListener('keydown', event => {
         event.stopPropagation();
         if (event.key === 'Enter') {
@@ -1944,7 +1968,7 @@
           saveRecordWithName(playerNameInput.value);
         }
       });
-      menuBtn.addEventListener('click', () => {
+      bindActionButton(menuBtn, () => {
         unlockAudio();
         state = GAME_STATE.READY;
         gameOverOverlay.classList.add('is-hidden');
