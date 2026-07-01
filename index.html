@@ -498,7 +498,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.5-hotfix4: start button event delegation fix -->
+    <!-- v1.2.5-hotfix5: start button event delegation fix -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -533,7 +533,7 @@
         </div>
         <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
         <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
-        <div class="version-badge">v1.2.5-hotfix4</div>
+        <div class="version-badge">v1.2.5-hotfix5</div>
       </div>
     </section>
 
@@ -1038,7 +1038,12 @@
         }
         setTimeout(() => {
           if (state !== GAME_STATE.GAME_OVER || pendingRecord !== finishedRecord) return;
+          startOverlay.classList.add('is-hidden');
+          startOverlay.style.display = 'none';
+          leaderboardOverlay.classList.add('is-hidden');
+          leaderboardOverlay.style.display = 'none';
           gameOverOverlay.classList.remove('is-hidden');
+          gameOverOverlay.style.display = '';
           if (shouldAskName) playerNameInput.focus({ preventScroll: true });
         }, 220);
       }
