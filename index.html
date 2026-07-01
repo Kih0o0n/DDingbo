@@ -206,6 +206,7 @@
     .overlay.is-hidden { display: none; }
 
     .card {
+      position: relative;
       width: min(92vw, 420px);
       max-height: calc(var(--app-height) - 32px);
       overflow-y: auto;
@@ -250,6 +251,18 @@
       line-height: 1.45;
       font-weight: 800;
       word-break: keep-all;
+    }
+
+    .version-badge {
+      position: absolute;
+      right: 12px;
+      bottom: 9px;
+      font-size: 10px;
+      font-weight: 900;
+      color: rgba(100, 116, 139, .72);
+      letter-spacing: -.02em;
+      pointer-events: none;
+      user-select: none;
     }
 
     .tips {
@@ -485,7 +498,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.5-hotfix2: start button tap binding hard fix -->
+    <!-- v1.2.5-hotfix3: start button event delegation fix -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -518,8 +531,9 @@
           <div class="tip">🔥 아슬아슬 회피를 연속으로 성공하면 COMBO UP!</div>
           <div class="tip">📺 VAR은 한 번 충돌을 무효 처리합니다.</div>
         </div>
-        <button id="startBtn" class="primary-btn" type="button" onclick="window.__ddingboStartGame && window.__ddingboStartGame(event)">경기 시작</button>
-        <button id="leaderboardBtn" class="secondary-btn" type="button" onclick="window.__ddingboOpenLeaderboard && window.__ddingboOpenLeaderboard(event)">명예의 전당 확인</button>
+        <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
+        <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
+        <div class="version-badge">v1.2.5-hotfix3</div>
       </div>
     </section>
 
@@ -973,6 +987,9 @@
         startOverlay.classList.add('is-hidden');
         leaderboardOverlay.classList.add('is-hidden');
         gameOverOverlay.classList.add('is-hidden');
+        startOverlay.style.display = 'none';
+        leaderboardOverlay.style.display = 'none';
+        gameOverOverlay.style.display = 'none';
         startTime = performance.now();
         lastTime = startTime;
         hiddenAt = 0;
@@ -1926,62 +1943,86 @@
       }
       window.addEventListener('orientationchange', () => setTimeout(resize, 160));
 
+      function preventButtonEvent(event) {
+        if (!event) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
       function bindActionButton(button, handler) {
         if (!button) return;
         let lastRunAt = -10000;
         const run = (event) => {
-          if (event) {
-            event.preventDefault();
-            event.stopPropagation();
-          }
+          preventButtonEvent(event);
           const now = performance.now();
-          if (now - lastRunAt < 450) return;
+          if (now - lastRunAt < 420) return;
           lastRunAt = now;
-          handler(event);
+          try {
+            handler(event);
+          } catch (error) {
+            console.error('[button action failed]', error);
+            showToast('버튼 오류가 발생했습니다. 새로고침 후 다시 시도해주세요.', 1400);
+          }
         };
+        button.onclick = run;
+        button.ontouchend = run;
+        button.onpointerup = run;
+      }
 
-        // 일부 모바일 브라우저에서 click/pointerup이 누락되는 경우가 있어
-        // 가장 먼저 발생하는 입력 이벤트에서 바로 실행되도록 여러 입력 방식을 함께 묶는다.
-        button.addEventListener('pointerdown', run, { passive: false });
-        button.addEventListener('touchstart', run, { passive: false });
-        button.addEventListener('mousedown', run, { passive: false });
-        button.addEventListener('click', run, { passive: false });
+      function forceStartFromButton(event) {
+        preventButtonEvent(event);
+        startGame();
       }
 
       async function openLeaderboard() {
         unlockAudio();
         renderRanking(leaderboardRankingEl, leaderboardNote);
         startOverlay.classList.add('is-hidden');
+        startOverlay.style.display = 'none';
         gameOverOverlay.classList.add('is-hidden');
+        gameOverOverlay.style.display = 'none';
         leaderboardOverlay.classList.remove('is-hidden');
+        leaderboardOverlay.style.display = '';
         await fetchSharedTop5();
         renderRanking(leaderboardRankingEl, leaderboardNote);
       }
 
-      window.__ddingboStartGame = (event) => {
-        if (event) {
-          event.preventDefault();
-          event.stopPropagation();
+      // 캡처 단계에서 먼저 버튼을 잡는다. 버튼 자체의 click이 막히는 환경에서도 경기 시작이 실행된다.
+      document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target && target.closest && target.closest('#startBtn')) forceStartFromButton(event);
+        else if (target && target.closest && target.closest('#leaderboardBtn')) {
+          preventButtonEvent(event);
+          openLeaderboard();
         }
-        startGame();
-      };
-      window.__ddingboOpenLeaderboard = async (event) => {
-        if (event) {
-          event.preventDefault();
-          event.stopPropagation();
+      }, true);
+
+      document.addEventListener('touchend', (event) => {
+        const target = event.target;
+        if (target && target.closest && target.closest('#startBtn')) forceStartFromButton(event);
+        else if (target && target.closest && target.closest('#leaderboardBtn')) {
+          preventButtonEvent(event);
+          openLeaderboard();
         }
-        await openLeaderboard();
+      }, { capture: true, passive: false });
+
+      window.__ddingboStartGame = forceStartFromButton;
+      window.__ddingboOpenLeaderboard = (event) => {
+        preventButtonEvent(event);
+        openLeaderboard();
       };
 
       bindHoldButton(leftBtn, -1);
       bindHoldButton(rightBtn, 1);
-      bindActionButton(startBtn, startGame);
+      bindActionButton(startBtn, forceStartFromButton);
       bindActionButton(leaderboardBtn, openLeaderboard);
       bindActionButton(leaderboardCloseBtn, () => {
         leaderboardOverlay.classList.add('is-hidden');
+        leaderboardOverlay.style.display = 'none';
         startOverlay.classList.remove('is-hidden');
+        startOverlay.style.display = '';
       });
-      bindActionButton(restartBtn, startGame);
+      bindActionButton(restartBtn, forceStartFromButton);
       bindActionButton(saveNameBtn, () => saveRecordWithName(playerNameInput.value));
       playerNameInput.addEventListener('keydown', event => {
         event.stopPropagation();
@@ -1994,8 +2035,11 @@
         unlockAudio();
         state = GAME_STATE.READY;
         gameOverOverlay.classList.add('is-hidden');
+        gameOverOverlay.style.display = 'none';
         leaderboardOverlay.classList.add('is-hidden');
+        leaderboardOverlay.style.display = 'none';
         startOverlay.classList.remove('is-hidden');
+        startOverlay.style.display = '';
         resetGame();
       });
 
