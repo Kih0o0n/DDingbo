@@ -273,6 +273,8 @@
 
     .primary-btn,
     .secondary-btn {
+      position: relative;
+      z-index: 20;
       width: 100%;
       border: 0;
       border-radius: 22px;
@@ -483,7 +485,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.5-hotfix: reliable start button + start button spacing -->
+    <!-- v1.2.5-hotfix2: start button tap binding hard fix -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -516,8 +518,8 @@
           <div class="tip">🔥 아슬아슬 회피를 연속으로 성공하면 COMBO UP!</div>
           <div class="tip">📺 VAR은 한 번 충돌을 무효 처리합니다.</div>
         </div>
-        <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
-        <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
+        <button id="startBtn" class="primary-btn" type="button" onclick="window.__ddingboStartGame && window.__ddingboStartGame(event)">경기 시작</button>
+        <button id="leaderboardBtn" class="secondary-btn" type="button" onclick="window.__ddingboOpenLeaderboard && window.__ddingboOpenLeaderboard(event)">명예의 전당 확인</button>
       </div>
     </section>
 
@@ -1926,18 +1928,23 @@
 
       function bindActionButton(button, handler) {
         if (!button) return;
-        let lastRunAt = 0;
+        let lastRunAt = -10000;
         const run = (event) => {
           if (event) {
             event.preventDefault();
             event.stopPropagation();
           }
           const now = performance.now();
-          if (now - lastRunAt < 320) return;
+          if (now - lastRunAt < 450) return;
           lastRunAt = now;
           handler(event);
         };
-        button.addEventListener('pointerup', run, { passive: false });
+
+        // 일부 모바일 브라우저에서 click/pointerup이 누락되는 경우가 있어
+        // 가장 먼저 발생하는 입력 이벤트에서 바로 실행되도록 여러 입력 방식을 함께 묶는다.
+        button.addEventListener('pointerdown', run, { passive: false });
+        button.addEventListener('touchstart', run, { passive: false });
+        button.addEventListener('mousedown', run, { passive: false });
         button.addEventListener('click', run, { passive: false });
       }
 
@@ -1950,6 +1957,21 @@
         await fetchSharedTop5();
         renderRanking(leaderboardRankingEl, leaderboardNote);
       }
+
+      window.__ddingboStartGame = (event) => {
+        if (event) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        startGame();
+      };
+      window.__ddingboOpenLeaderboard = async (event) => {
+        if (event) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        await openLeaderboard();
+      };
 
       bindHoldButton(leftBtn, -1);
       bindHoldButton(rightBtn, 1);
