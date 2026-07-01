@@ -498,7 +498,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.5-hotfix3: start button event delegation fix -->
+    <!-- v1.2.5-hotfix4: start button event delegation fix -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -533,7 +533,7 @@
         </div>
         <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
         <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
-        <div class="version-badge">v1.2.5-hotfix3</div>
+        <div class="version-badge">v1.2.5-hotfix4</div>
       </div>
     </section>
 
@@ -674,6 +674,9 @@
       let nextWaveAt = 22;
       let nextBossAt = 38;
       let waveSafetyUntil = 0;
+      let waveCorridorUntil = 0;
+      let waveCorridorMin = 0;
+      let waveCorridorMax = 0;
       let shake = 0;
       let leftHeld = false;
       let rightHeld = false;
