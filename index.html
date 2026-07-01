@@ -207,6 +207,9 @@
 
     .card {
       width: min(92vw, 420px);
+      max-height: calc(var(--app-height) - 32px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
       max-height: calc(var(--app-height) - 24px);
       overflow-y: auto;
       overscroll-behavior: contain;
@@ -602,7 +605,7 @@
       });
       const LEADERBOARD_LIMIT = 5;
       const SERVER_RECORD_LIMIT = 20;
-      const COMBO_WINDOW_SECONDS = 3;
+      const COMBO_WINDOW_SECONDS = 2;
       const DPR_LIMIT = 2;
 
       // 실행 상태
@@ -662,6 +665,7 @@
         drawH: 0,
         baseSpeed: 430,
         shield: 0,
+        shieldUntil: 0,
         invincibleUntil: 0,
         blinkUntil: 0,
         noteUntil: 0
@@ -865,8 +869,8 @@
       }
 
       function positionPlayer() {
-        const minDrawH = H < 520 ? 39 : 46;
-        player.drawH = Math.max(minDrawH, Math.min(66, W * 0.145));
+        const minDrawH = H < 520 ? 43 : 51;
+        player.drawH = Math.max(minDrawH, Math.min(73, W * 0.1595));
         player.drawW = Math.round(player.drawH * (2 / 3));
         const bottomOffset = getBottomReserve();
         player.y = H - bottomOffset - player.drawH * 0.20;
@@ -922,9 +926,10 @@
         pendingRecord = null;
         nameEntry.classList.remove('show');
         player.x = W / 2;
-        player.r = Math.max(9, Math.min(12, W * 0.025));
+        player.r = Math.max(10, Math.min(13, W * 0.0275));
         positionPlayer();
         player.shield = 0;
+        player.shieldUntil = 0;
         player.invincibleUntil = 0;
         player.blinkUntil = 0;
         player.noteUntil = 0;
@@ -1005,6 +1010,8 @@
         title.innerHTML = '<span>' + label + '</span><span>이름 / 점수</span>';
         rankingEl.appendChild(title);
         const rows = top5.length ? top5 : [
+          { name: '-', score: 0, time: 0, near: 0 },
+          { name: '-', score: 0, time: 0, near: 0 },
           { name: '-', score: 0, time: 0, near: 0 },
           { name: '-', score: 0, time: 0, near: 0 },
           { name: '-', score: 0, time: 0, near: 0 }
@@ -1153,31 +1160,27 @@
         // 웨이브가 도착할 때 기존 랜덤 장애물이 통로를 막지 않도록 경기장을 정리하고,
         // 두 줄이 플레이어를 통과할 때까지 일반 장애물과 보스 생성을 잠시 멈춘다.
         obstacles = obstacles.filter(ob => ob.y > player.y + ob.r);
-        waveSafetyUntil = elapsed + Math.max(5.2, (player.y + 190) / 165);
+        waveSafetyUntil = elapsed + Math.max(4.4, (player.y + 150) / 195);
         nextObstacleAt = Math.max(nextObstacleAt, waveSafetyUntil);
-        nextBossAt = Math.max(nextBossAt, waveSafetyUntil + 1.5);
+        nextBossAt = Math.max(nextBossAt, waveSafetyUntil + 1.0);
 
-        // 두 줄이 같은 빈 열을 사용해 끝까지 이어지는 안전 통로를 만든다.
-        const count = Math.max(5, Math.min(7, Math.floor(W / 64)));
+        // 한 줄 전체가 떨어지되, 한 칸짜리 안전 통로만 남겨 난이도를 올린다.
+        // 같은 빈 열을 3줄 모두 유지하므로 어렵지만 억울하지 않게 피할 수 있다.
+        const count = Math.max(6, Math.min(8, Math.floor(W / 58)));
         const cell = W / count;
-        const r = clamp(cell * 0.30, 20, 28);
+        const r = clamp(cell * 0.34, 22, 32);
         const gapIndex = Math.floor(random(1, count - 1));
         const safeColumns = new Set([gapIndex]);
 
-        // 화면이 충분히 넓으면 2칸짜리 안전 통로를 만들어 모바일에서도 이동 여유를 준다.
-        if (W >= 340) {
-          safeColumns.add(Math.random() < 0.5 ? gapIndex - 1 : gapIndex + 1);
-        }
-
-        for (let row = 0; row < 2; row++) {
+        for (let row = 0; row < 3; row++) {
           for (let i = 0; i < count; i++) {
             if (safeColumns.has(i)) continue;
             createObstacle({
               type: 'wave',
               x: cell * i + cell / 2,
-              y: -76 - row * 86,
+              y: -72 - row * 72,
               size: r * 2,
-              speed: random(165, 205) + getIntensity() * 45,
+              speed: random(190, 238) + getIntensity() * 55,
               vx: 0
             });
           }
@@ -1283,8 +1286,9 @@
       }
 
       function handleHit(ob) {
-        if (player.shield > 0) {
-          player.shield -= 1;
+        if (player.shield > 0 && elapsed <= player.shieldUntil) {
+          player.shield = 0;
+          player.shieldUntil = 0;
           player.invincibleUntil = elapsed + 1.2;
           player.blinkUntil = elapsed + 1.2;
           showToast('VAR 판독: 노파울!', 1050);
@@ -1293,6 +1297,10 @@
           burst(ob.x, ob.y, 24, '#93c5fd');
           obstacles = obstacles.filter(item => item !== ob);
           return;
+        }
+        if (player.shield > 0 && elapsed > player.shieldUntil) {
+          player.shield = 0;
+          player.shieldUntil = 0;
         }
         const hit = getPlayerHitCircle();
         burst(hit.x, hit.y, 32, '#fca5a5');
@@ -1328,8 +1336,9 @@
 
       function collectItem(item) {
         if (item.type === 'var') {
-          player.shield = Math.min(2, player.shield + 1);
-          showToast('VAR 획득! 1회 무효', 900);
+          player.shield = 1;
+          player.shieldUntil = elapsed + 5;
+          showToast('VAR 획득! 5초 안에 1회 무효', 900);
           burst(item.x, item.y, 22, '#93c5fd');
         } else if (item.type === 'note') {
           player.noteUntil = elapsed + 5.2;
@@ -1382,9 +1391,13 @@
         timeText.textContent = formatTime(elapsed);
         scoreText.textContent = String(Math.round(score));
         if (combo > 0 && elapsed > comboExpiresAt) combo = 0;
+        if (player.shield > 0 && elapsed > player.shieldUntil) {
+          player.shield = 0;
+          player.shieldUntil = 0;
+        }
         const pills = [];
         if (combo > 1) pills.push(['🔥 COMBO x' + combo, 'red']);
-        if (player.shield > 0) pills.push(['📺 VAR x' + player.shield, 'blue']);
+        if (player.shield > 0) pills.push(['📺 VAR ' + Math.max(0, Math.ceil(player.shieldUntil - elapsed)) + '초', 'blue']);
         if (isNoteActive()) pills.push(['📋 슬로우 ' + Math.ceil(player.noteUntil - elapsed) + '초', 'purple']);
         if (nearCount > 0) pills.push(['⚡ 아슬아슬 ' + nearCount + '회', '']);
         statusRow.innerHTML = pills.map(([text, color]) => '<span class="pill ' + color + '">' + text + '</span>').join('');
@@ -1520,7 +1533,7 @@
         ctx.save();
         ctx.translate(player.x, player.y);
 
-        if (player.shield > 0) {
+        if (player.shield > 0 && elapsed <= player.shieldUntil) {
           ctx.strokeStyle = 'rgba(147,197,253,.95)';
           ctx.lineWidth = 5;
           ctx.beginPath();
