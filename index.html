@@ -254,7 +254,7 @@
 
     .tips {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
       gap: 8px;
       margin: 16px 0 18px;
       text-align: left;
@@ -479,6 +479,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
+    <!-- v1.2.5: start hall of fame + safe wave corridor -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -508,11 +509,25 @@
         <p class="subtitle">32강은 못 갔지만…<br />너는 살아남아라.</p>
         <div class="tips">
           <div class="tip">👈 아래 ◀ ▶ 버튼을 길게 눌러 움직이세요.</div>
-          <div class="tip">🔥 아슬아슬 회피를 연속으로 성공하면 COMBO UP! 보너스 점수가 커집니다.</div>
-          <div class="tip">📺 VAR는 한 번 충돌을 무효 처리합니다.</div>
-          <div class="tip">⚠️ 가까스로 피하면 랭킹 점수가 크게 올라갑니다!</div>
+          <div class="tip">🔥 아슬아슬 회피를 연속으로 성공하면 COMBO UP!</div>
+          <div class="tip">📺 VAR은 한 번 충돌을 무효 처리합니다.</div>
         </div>
         <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
+        <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
+      </div>
+    </section>
+
+    <!-- 명예의 전당 화면 -->
+    <section id="leaderboardOverlay" class="overlay is-hidden">
+      <div class="card">
+        <div class="badge">TOP 5</div>
+        <h1>명예의 전당</h1>
+        <p class="subtitle">친구들의 최고 점수를 확인해보세요.</p>
+        <div class="result-box">
+          <div id="leaderboardRanking" class="ranking"></div>
+          <div id="leaderboardNote" class="rank-note">공유 랭킹 연결 중...</div>
+        </div>
+        <button id="leaderboardCloseBtn" class="secondary-btn" type="button">돌아가기</button>
       </div>
     </section>
 
@@ -569,6 +584,11 @@
       const startOverlay = document.getElementById('startOverlay');
       const gameOverOverlay = document.getElementById('gameOverOverlay');
       const startBtn = document.getElementById('startBtn');
+      const leaderboardBtn = document.getElementById('leaderboardBtn');
+      const leaderboardOverlay = document.getElementById('leaderboardOverlay');
+      const leaderboardRankingEl = document.getElementById('leaderboardRanking');
+      const leaderboardNote = document.getElementById('leaderboardNote');
+      const leaderboardCloseBtn = document.getElementById('leaderboardCloseBtn');
       const restartBtn = document.getElementById('restartBtn');
       const menuBtn = document.getElementById('menuBtn');
       const finalTime = document.getElementById('finalTime');
@@ -914,6 +934,9 @@
         nextWaveAt = 18;
         nextBossAt = 38;
         waveSafetyUntil = 0;
+        waveCorridorUntil = 0;
+        waveCorridorMin = 0;
+        waveCorridorMax = 0;
         hiddenAt = 0;
         shake = 0;
         releaseControls();
@@ -942,6 +965,7 @@
         resetGame();
         state = GAME_STATE.PLAYING;
         startOverlay.classList.add('is-hidden');
+        leaderboardOverlay.classList.add('is-hidden');
         gameOverOverlay.classList.add('is-hidden');
         startTime = performance.now();
         lastTime = startTime;
@@ -1002,13 +1026,14 @@
       }
 
       // 랭킹 UI
-      function renderRanking() {
-        rankingEl.innerHTML = '';
+      function renderRanking(targetEl = rankingEl, noteEl = rankNote) {
+        if (!targetEl) return;
+        targetEl.innerHTML = '';
         const title = document.createElement('div');
         title.className = 'rank-line';
         const label = isSharedEnabled() ? '🏆 명예의 전당' : '🏆 기기 TOP 5';
         title.innerHTML = '<span>' + label + '</span><span>이름 / 점수</span>';
-        rankingEl.appendChild(title);
+        targetEl.appendChild(title);
         const rows = top5.length ? top5 : [
           { name: '-', score: 0, time: 0, near: 0 },
           { name: '-', score: 0, time: 0, near: 0 },
@@ -1023,13 +1048,16 @@
           const name = normalizeName(record.name || '-');
           const sub = record.score > 0 ? name + ' · ' + Math.round(record.score) + '점 · ' + formatTime(record.time) + '초 · 아슬 ' + record.near : '기록 없음';
           row.innerHTML = '<span>' + medal + '</span><span>' + sub + '</span>';
-          rankingEl.appendChild(row);
+          targetEl.appendChild(row);
         });
-        if (rankNote) {
-          if (isSharedEnabled() && sharedLeaderboardReady) rankNote.textContent = '공유 랭킹 연결 완료: 현재 표시되는 명예의 전당은 Firebase 서버에서 불러온 기록입니다.';
-          else if (isSharedEnabled() && sharedLeaderboardError) rankNote.textContent = '공유 랭킹 연결 실패: Firebase 규칙에서 rankings 읽기/쓰기를 허용했는지 확인해 주세요. 지금 보이는 기록은 이 기기 임시 기록입니다.';
-          else if (isSharedEnabled()) rankNote.textContent = '공유 랭킹 연결 중...';
-          else rankNote.textContent = '현재는 이 기기 안에만 저장됩니다. Firebase 주소를 넣으면 모두에게 공유됩니다.';
+        if (noteEl) {
+          if (isSharedEnabled() && sharedLeaderboardReady) noteEl.textContent = '공유 랭킹 연결 완료: 현재 표시되는 명예의 전당은 Firebase 서버에서 불러온 기록입니다.';
+          else if (isSharedEnabled() && sharedLeaderboardError) noteEl.textContent = '공유 랭킹 연결 실패: Firebase 규칙에서 rankings 읽기/쓰기를 허용했는지 확인해 주세요. 지금 보이는 기록은 이 기기 임시 기록입니다.';
+          else if (isSharedEnabled()) noteEl.textContent = '공유 랭킹 연결 중...';
+          else noteEl.textContent = '현재는 이 기기 안에만 저장됩니다. Firebase 주소를 넣으면 모두에게 공유됩니다.';
+        }
+        if (targetEl === rankingEl && leaderboardRankingEl) {
+          renderRanking(leaderboardRankingEl, leaderboardNote);
         }
       }
 
@@ -1095,6 +1123,64 @@
         return clamp(elapsed / 95, 0, 1);
       }
 
+      function getRandomSpawnX(r) {
+        if (elapsed < waveCorridorUntil && waveCorridorMax > waveCorridorMin) {
+          const leftMin = r + 8;
+          const leftMax = waveCorridorMin - r - 10;
+          const rightMin = waveCorridorMax + r + 10;
+          const rightMax = W - r - 8;
+          const canLeft = leftMax > leftMin;
+          const canRight = rightMax > rightMin;
+          if (canLeft && canRight) {
+            return Math.random() < 0.5 ? random(leftMin, leftMax) : random(rightMin, rightMax);
+          }
+          if (canLeft) return random(leftMin, leftMax);
+          if (canRight) return random(rightMin, rightMax);
+        }
+        return random(r + 8, W - r - 8);
+      }
+
+      function estimateObstacleX(ob, t) {
+        if (ob.type === 'zigzag') {
+          return ob.baseX + Math.sin((elapsed - ob.born + t) * ob.wobble * 4.2) * ob.amp;
+        }
+        return ob.x + (ob.vx || 0) * t;
+      }
+
+      function getWaveGapScore(index, cell, waveRadius, waveSpeed, rowCount, rowGap) {
+        const hit = getPlayerHitCircle();
+        const center = cell * index + cell / 2;
+        const corridorHalf = Math.max(cell * 0.48, getPlayerHorizontalRadius() + waveRadius * 0.20);
+        const firstPass = Math.max(0, (hit.y + 68) / waveSpeed - 0.35);
+        const lastPass = Math.max(firstPass + 0.8, (hit.y + 68 + rowGap * (rowCount - 1)) / waveSpeed + 0.85);
+        let score = 0;
+
+        for (const ob of obstacles) {
+          if (ob.y > H + ob.r || ob.y < -260) continue;
+          const vy = Math.max(40, ob.vy || 180);
+          const t = (hit.y - ob.y) / vy;
+          if (t < -0.25 || t > lastPass) continue;
+          const projectedX = estimateObstacleX(ob, clamp(t, 0, lastPass));
+          const blockRange = corridorHalf + (ob.hitRadius || ob.r * 0.72) + getPlayerHorizontalRadius() * 0.45;
+          const dx = Math.abs(projectedX - center);
+          if (dx < blockRange) {
+            const passMid = (firstPass + lastPass) / 2;
+            const timeWeight = 1 + Math.max(0, 1.8 - Math.abs(t - passMid));
+            score += ((blockRange - dx) / blockRange) * 10 * timeWeight;
+          }
+        }
+        return score;
+      }
+
+      function chooseWaveGapIndex(count, cell, waveRadius, waveSpeed, rowCount, rowGap) {
+        const candidates = [];
+        for (let i = 1; i < count - 1; i++) {
+          candidates.push({ index: i, score: getWaveGapScore(i, cell, waveRadius, waveSpeed, rowCount, rowGap) });
+        }
+        candidates.sort((a, b) => a.score - b.score || Math.abs(a.index - count / 2) - Math.abs(b.index - count / 2));
+        return candidates[0] || { index: Math.floor(count / 2), score: 0 };
+      }
+
       function spawnObstacleRandom() {
         const intensity = getIntensity();
         const roll = Math.random();
@@ -1134,7 +1220,7 @@
         }
         const ob = {
           type,
-          x: x ?? random(r + 8, W - r - 8),
+          x: x ?? getRandomSpawnX(r),
           y: y ?? -r - random(10, 80),
           baseX: 0,
           r,
@@ -1153,28 +1239,46 @@
       }
 
       function spawnWave() {
-        showToast('띵보님 웨이브! 기존 장애물까지 조심!', 1200);
+        showToast('띵보님 웨이브! 안전 통로를 찾아라!', 1200);
         playTone('wave');
         shake = Math.max(shake, 8);
 
         // 기존 방해물은 제거하지 않는다.
-        // 웨이브 자체에는 한 칸짜리 안전 통로를 유지하되, 기존 장애물과 함께 내려오므로 더 긴장감 있게 피해야 한다.
+        // 대신 현재 내려오는 장애물의 예상 위치를 보고, 안전 통로가 막히지 않는 열을 골라 억까 패턴을 줄인다.
         waveSafetyUntil = elapsed;
         const count = Math.max(7, Math.min(9, Math.floor(W / 52)));
         const cell = W / count;
         const r = clamp(cell * 0.37, 23, 34);
-        const gapIndex = Math.floor(random(1, count - 1));
-        const safeColumns = new Set([gapIndex]);
+        const rowCount = 4;
+        const rowGap = 64;
+        const waveSpeed = 236 + getIntensity() * 62;
+        const chosen = chooseWaveGapIndex(count, cell, r, waveSpeed, rowCount, rowGap);
+        const safeColumns = new Set([chosen.index]);
 
-        for (let row = 0; row < 4; row++) {
+        // 모든 한 칸 통로가 이미 위험한 경우에만 보조 통로를 하나 추가한다.
+        // 평소에는 한 칸 통로라 어렵고, 정말 막힐 때만 억울한 사망을 방지한다.
+        if (chosen.score > 7.5) {
+          const leftScore = chosen.index > 1 ? getWaveGapScore(chosen.index - 1, cell, r, waveSpeed, rowCount, rowGap) : Infinity;
+          const rightScore = chosen.index < count - 2 ? getWaveGapScore(chosen.index + 1, cell, r, waveSpeed, rowCount, rowGap) : Infinity;
+          if (leftScore < rightScore && Number.isFinite(leftScore)) safeColumns.add(chosen.index - 1);
+          else if (Number.isFinite(rightScore)) safeColumns.add(chosen.index + 1);
+        }
+
+        const minSafe = Math.min(...safeColumns);
+        const maxSafe = Math.max(...safeColumns);
+        waveCorridorMin = minSafe * cell;
+        waveCorridorMax = (maxSafe + 1) * cell;
+        waveCorridorUntil = elapsed + Math.max(3.4, (player.y + rowGap * rowCount) / waveSpeed + 0.7);
+
+        for (let row = 0; row < rowCount; row++) {
           for (let i = 0; i < count; i++) {
             if (safeColumns.has(i)) continue;
             createObstacle({
               type: 'wave',
               x: cell * i + cell / 2,
-              y: -68 - row * 64,
+              y: -68 - row * rowGap,
               size: r * 2,
-              speed: random(212, 260) + getIntensity() * 62,
+              speed: random(216, 264) + getIntensity() * 64,
               vx: 0
             });
           }
@@ -1819,6 +1923,18 @@
       bindHoldButton(leftBtn, -1);
       bindHoldButton(rightBtn, 1);
       startBtn.addEventListener('click', startGame);
+      leaderboardBtn.addEventListener('click', async () => {
+        unlockAudio();
+        renderRanking(leaderboardRankingEl, leaderboardNote);
+        startOverlay.classList.add('is-hidden');
+        leaderboardOverlay.classList.remove('is-hidden');
+        await fetchSharedTop5();
+        renderRanking(leaderboardRankingEl, leaderboardNote);
+      });
+      leaderboardCloseBtn.addEventListener('click', () => {
+        leaderboardOverlay.classList.add('is-hidden');
+        startOverlay.classList.remove('is-hidden');
+      });
       restartBtn.addEventListener('click', startGame);
       saveNameBtn.addEventListener('click', () => saveRecordWithName(playerNameInput.value));
       playerNameInput.addEventListener('keydown', event => {
@@ -1832,6 +1948,7 @@
         unlockAudio();
         state = GAME_STATE.READY;
         gameOverOverlay.classList.add('is-hidden');
+        leaderboardOverlay.classList.add('is-hidden');
         startOverlay.classList.remove('is-hidden');
         resetGame();
       });
