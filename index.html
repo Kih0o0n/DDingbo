@@ -911,7 +911,7 @@
         lastMilestone = 0;
         nextObstacleAt = 0;
         nextItemAt = 4.5;
-        nextWaveAt = 22;
+        nextWaveAt = 18;
         nextBossAt = 38;
         waveSafetyUntil = 0;
         hiddenAt = 0;
@@ -1074,9 +1074,9 @@
         const intensity = getIntensity();
         if (elapsed >= nextWaveAt) {
           spawnWave();
-          nextWaveAt = elapsed + random(25, 32);
+          nextWaveAt = elapsed + random(21, 27);
         }
-        if (elapsed >= nextObstacleAt && elapsed >= waveSafetyUntil) {
+        if (elapsed >= nextObstacleAt) {
           spawnObstacleRandom();
           const baseGap = lerp(0.78, 0.36, intensity);
           nextObstacleAt = elapsed + random(baseGap * 0.72, baseGap * 1.18);
@@ -1085,7 +1085,7 @@
           spawnItem();
           nextItemAt = elapsed + random(9, 15);
         }
-        if (elapsed >= nextBossAt && elapsed >= waveSafetyUntil) {
+        if (elapsed >= nextBossAt) {
           spawnBoss();
           nextBossAt = elapsed + random(38, 48);
         }
@@ -1153,34 +1153,28 @@
       }
 
       function spawnWave() {
-        showToast('띵보님 웨이브! 안전 통로로 빠져나가라', 1200);
+        showToast('띵보님 웨이브! 기존 장애물까지 조심!', 1200);
         playTone('wave');
-        shake = Math.max(shake, 6);
+        shake = Math.max(shake, 8);
 
-        // 웨이브가 도착할 때 기존 랜덤 장애물이 통로를 막지 않도록 경기장을 정리하고,
-        // 두 줄이 플레이어를 통과할 때까지 일반 장애물과 보스 생성을 잠시 멈춘다.
-        obstacles = obstacles.filter(ob => ob.y > player.y + ob.r);
-        waveSafetyUntil = elapsed + Math.max(4.4, (player.y + 150) / 195);
-        nextObstacleAt = Math.max(nextObstacleAt, waveSafetyUntil);
-        nextBossAt = Math.max(nextBossAt, waveSafetyUntil + 1.0);
-
-        // 한 줄 전체가 떨어지되, 한 칸짜리 안전 통로만 남겨 난이도를 올린다.
-        // 같은 빈 열을 3줄 모두 유지하므로 어렵지만 억울하지 않게 피할 수 있다.
-        const count = Math.max(6, Math.min(8, Math.floor(W / 58)));
+        // 기존 방해물은 제거하지 않는다.
+        // 웨이브 자체에는 한 칸짜리 안전 통로를 유지하되, 기존 장애물과 함께 내려오므로 더 긴장감 있게 피해야 한다.
+        waveSafetyUntil = elapsed;
+        const count = Math.max(7, Math.min(9, Math.floor(W / 52)));
         const cell = W / count;
-        const r = clamp(cell * 0.34, 22, 32);
+        const r = clamp(cell * 0.37, 23, 34);
         const gapIndex = Math.floor(random(1, count - 1));
         const safeColumns = new Set([gapIndex]);
 
-        for (let row = 0; row < 3; row++) {
+        for (let row = 0; row < 4; row++) {
           for (let i = 0; i < count; i++) {
             if (safeColumns.has(i)) continue;
             createObstacle({
               type: 'wave',
               x: cell * i + cell / 2,
-              y: -72 - row * 72,
+              y: -68 - row * 64,
               size: r * 2,
-              speed: random(190, 238) + getIntensity() * 55,
+              speed: random(212, 260) + getIntensity() * 62,
               vx: 0
             });
           }
@@ -1779,7 +1773,14 @@
         button.addEventListener('pointerleave', up, { passive: false });
       }
 
+      function isTypingTarget(target) {
+        return target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          Boolean(target && target.isContentEditable);
+      }
+
       window.addEventListener('keydown', (event) => {
+        if (isTypingTarget(event.target)) return;
         if (['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD', 'Space', 'Enter'].includes(event.code)) {
           event.preventDefault();
           unlockAudio();
@@ -1789,6 +1790,7 @@
       });
 
       window.addEventListener('keyup', (event) => {
+        if (isTypingTarget(event.target)) return;
         keys.delete(event.code);
       });
 
@@ -1820,7 +1822,11 @@
       restartBtn.addEventListener('click', startGame);
       saveNameBtn.addEventListener('click', () => saveRecordWithName(playerNameInput.value));
       playerNameInput.addEventListener('keydown', event => {
-        if (event.key === 'Enter') saveRecordWithName(playerNameInput.value);
+        event.stopPropagation();
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          saveRecordWithName(playerNameInput.value);
+        }
       });
       menuBtn.addEventListener('click', () => {
         unlockAudio();
