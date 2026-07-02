@@ -372,7 +372,9 @@
     }
 
     .rank-line span:last-child {
+      min-width: 0;
       text-align: right;
+      overflow-wrap: anywhere;
     }
 
     .name-entry {
@@ -498,7 +500,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.6: no wave, progressive fair difficulty -->
+    <!-- v1.2.7: leaderboard ranking and nickname validation improvements -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -533,7 +535,7 @@
         </div>
         <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
         <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
-        <div class="version-badge">v1.2.6</div>
+        <div class="version-badge">v1.2.7</div>
       </div>
     </section>
 
@@ -577,7 +579,7 @@
           <div id="nameEntry" class="name-entry">
             <div id="nameEntryTitle" class="name-entry-title">🏆 TOP 5 진입! 이름을 남겨주세요.</div>
             <div class="name-entry-row">
-              <input id="playerNameInput" type="text" maxlength="10" inputmode="text" autocomplete="nickname" placeholder="이름 입력" />
+              <input id="playerNameInput" type="text" maxlength="8" inputmode="text" autocomplete="nickname" placeholder="이름 입력" />
               <button id="saveNameBtn" type="button">등록</button>
             </div>
           </div>
@@ -720,19 +722,28 @@
         return Number.isFinite(raw) ? raw : fallback;
       }
 
-      function normalizeName(name) {
-        const cleaned = String(name || '')
+      function cleanPlayerName(name) {
+        return String(name || '')
           .replace(/[<>]/g, '')
           .trim()
-          .replace(/\s+/g, ' ')
-          .slice(0, 10);
-        return cleaned || '익명';
+          .replace(/\s+/g, ' ');
+      }
+
+      function normalizeName(name) {
+        return cleanPlayerName(name) || '익명';
+      }
+
+      function validatePlayerName(name) {
+        const normalized = cleanPlayerName(name);
+        const length = Array.from(normalized).length;
+        return {
+          valid: length >= 2 && length <= 8,
+          name: normalized
+        };
       }
 
       function normalizePlayerKey(name) {
-        return String(name || '')
-          .trim()
-          .replace(/\s+/g, ' ')
+        return normalizeName(name)
           .toLocaleLowerCase('ko-KR');
       }
 
@@ -760,10 +771,10 @@
       }
 
       function isBetterRecord(candidate, current) {
-        return compareRankRecords(candidate, current) < 0;
+        return Number(candidate.score || 0) > Number(current.score || 0);
       }
 
-      function dedupeLeaderboardByNickname(records, limit = LEADERBOARD_LIMIT) {
+      function dedupeLeaderboardByNickname(records) {
         const bestByPlayer = new Map();
 
         records.map(normalizeRecord).forEach(record => {
@@ -771,16 +782,35 @@
           const key = normalizePlayerKey(record.name);
           if (!key) return;
           const current = bestByPlayer.get(key);
-          if (!current || isBetterRecord(record, current)) bestByPlayer.set(key, record);
+          const sameScoreEarlier = current &&
+            record.score === current.score &&
+            record.createdAt < current.createdAt;
+          if (!current || isBetterRecord(record, current) || sameScoreEarlier) {
+            bestByPlayer.set(key, record);
+          }
         });
 
         return Array.from(bestByPlayer.values())
-          .sort(compareRankRecords)
-          .slice(0, limit);
+          .sort(compareRankRecords);
+      }
+
+      function rankRecords(records) {
+        let previousScore = null;
+        let currentRank = 0;
+        return records.slice().sort(compareRankRecords).map((record, index) => {
+          if (previousScore === null || record.score !== previousScore) currentRank = index + 1;
+          previousScore = record.score;
+          return { ...record, rank: currentRank };
+        });
+      }
+
+      function getVisibleLeaderboard(records) {
+        return rankRecords(dedupeLeaderboardByNickname(records))
+          .filter(record => record.rank <= LEADERBOARD_LIMIT);
       }
 
       function sortTop(records) {
-        return dedupeLeaderboardByNickname(records);
+        return getVisibleLeaderboard(records);
       }
 
       function readTop5() {
@@ -897,7 +927,7 @@
       async function trimSharedLeaderboard() {
         if (!isSharedEnabled()) return;
         const records = await fetchSharedRecords();
-        const keepRecords = dedupeLeaderboardByNickname(records, SERVER_RECORD_LIMIT);
+        const keepRecords = dedupeLeaderboardByNickname(records).slice(0, SERVER_RECORD_LIMIT);
         const keepIds = new Set(keepRecords.map(record => record.id).filter(Boolean));
         const extraRecords = records.filter(record => record.id && !keepIds.has(record.id));
         const responses = await Promise.all(extraRecords.map(record =>
@@ -921,13 +951,22 @@
       }
 
       function isTop5Candidate(record) {
-        const ranked = sortTop(top5.concat(record));
-        return ranked.some(item => item.createdAt === record.createdAt && item.score === record.score);
+        const validRecords = dedupeLeaderboardByNickname(top5);
+        if (validRecords.length < LEADERBOARD_LIMIT) return true;
+        const candidateScore = Number(record && record.score) || 0;
+        const candidateRank = 1 + validRecords.filter(item => item.score > candidateScore).length;
+        return candidateRank <= LEADERBOARD_LIMIT;
       }
 
       async function saveRecordWithName(name) {
         if (!pendingRecord) return;
-        const record = { ...pendingRecord, name: normalizeName(name), nearMiss: pendingRecord.near };
+        const validation = validatePlayerName(name);
+        if (!validation.valid) {
+          showToast('닉네임은 2~8자로 입력해주세요.', 1800);
+          playerNameInput.focus({ preventScroll: true });
+          return;
+        }
+        const record = { ...pendingRecord, name: validation.name, nearMiss: pendingRecord.near };
         localStorage.setItem(STORAGE_KEYS.playerName, record.name);
         pendingRecord = null;
         nameEntry.classList.remove('show');
@@ -1110,6 +1149,13 @@
       }
 
       // 랭킹 UI
+      function getRankLabel(rank) {
+        if (rank === 1) return '🥇';
+        if (rank === 2) return '🥈';
+        if (rank === 3) return '🥉';
+        return rank + '위';
+      }
+
       function renderRanking(targetEl = rankingEl, noteEl = rankNote) {
         if (!targetEl) return;
         targetEl.innerHTML = '';
@@ -1119,19 +1165,19 @@
         title.innerHTML = '<span>' + label + '</span><span>이름 / 점수</span>';
         targetEl.appendChild(title);
         const rows = top5.length ? top5 : [
-          { name: '-', score: 0, time: 0, near: 0 },
-          { name: '-', score: 0, time: 0, near: 0 },
-          { name: '-', score: 0, time: 0, near: 0 },
-          { name: '-', score: 0, time: 0, near: 0 },
-          { name: '-', score: 0, time: 0, near: 0 }
+          { name: '-', score: 0, time: 0, near: 0, rank: 1 },
+          { name: '-', score: 0, time: 0, near: 0, rank: 2 },
+          { name: '-', score: 0, time: 0, near: 0, rank: 3 },
+          { name: '-', score: 0, time: 0, near: 0, rank: 4 },
+          { name: '-', score: 0, time: 0, near: 0, rank: 5 }
         ];
-        rows.slice(0, LEADERBOARD_LIMIT).forEach((record, index) => {
+        rows.forEach(record => {
           const row = document.createElement('div');
           row.className = 'rank-line';
-          const medal = ['🥇', '🥈', '🥉', '4위', '5위'][index];
+          const rankLabel = getRankLabel(record.rank);
           const name = normalizeName(record.name || '-');
           const sub = record.score > 0 ? name + ' · ' + Math.round(record.score) + '점 · ' + formatTime(record.time) + '초 · 아슬 ' + record.near : '기록 없음';
-          row.innerHTML = '<span>' + medal + '</span><span>' + sub + '</span>';
+          row.innerHTML = '<span>' + rankLabel + '</span><span>' + sub + '</span>';
           targetEl.appendChild(row);
         });
         if (noteEl) {
