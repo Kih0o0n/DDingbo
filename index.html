@@ -721,33 +721,66 @@
       }
 
       function normalizeName(name) {
-        const cleaned = String(name || '').replace(/[<>]/g, '').trim().slice(0, 10);
+        const cleaned = String(name || '')
+          .replace(/[<>]/g, '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .slice(0, 10);
         return cleaned || '익명';
+      }
+
+      function normalizePlayerKey(name) {
+        return String(name || '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toLocaleLowerCase('ko-KR');
       }
 
       function normalizeRecord(item) {
         if (typeof item === 'number') {
           return { name: '익명', score: Math.round(item), time: 0, near: 0, createdAt: Date.now() };
         }
-        return {
+        const record = {
           name: normalizeName(item && item.name),
           score: Math.round(Number(item && item.score) || 0),
           time: Number(item && item.time) || 0,
           near: Math.round(Number(item && (item.near ?? item.nearMiss)) || 0),
           createdAt: Number(item && item.createdAt) || Date.now()
         };
+        if (item && item.id != null) record.id = String(item.id);
+        return record;
       }
 
-      function compareRecord(a, b) {
-        return b.score - a.score || b.time - a.time || a.createdAt - b.createdAt;
+      function compareRankRecords(a, b) {
+        return (
+          Number(b.score || 0) - Number(a.score || 0) ||
+          Number(b.time || 0) - Number(a.time || 0) ||
+          Number(a.createdAt || 0) - Number(b.createdAt || 0)
+        );
+      }
+
+      function isBetterRecord(candidate, current) {
+        return compareRankRecords(candidate, current) < 0;
+      }
+
+      function dedupeLeaderboardByNickname(records, limit = LEADERBOARD_LIMIT) {
+        const bestByPlayer = new Map();
+
+        records.map(normalizeRecord).forEach(record => {
+          if (record.score <= 0) return;
+          const key = normalizePlayerKey(record.name);
+          if (!key) return;
+          const current = bestByPlayer.get(key);
+          if (!current || isBetterRecord(record, current)) bestByPlayer.set(key, record);
+        });
+
+        return Array.from(bestByPlayer.values())
+          .sort(compareRankRecords)
+          .slice(0, limit);
       }
 
       function sortTop(records) {
-        return records
-          .map(normalizeRecord)
-          .filter(item => item.score > 0)
-          .sort(compareRecord)
-          .slice(0, LEADERBOARD_LIMIT);
+        return dedupeLeaderboardByNickname(records);
       }
 
       function readTop5() {
@@ -773,6 +806,30 @@
         return base + '/' + path + suffix;
       }
 
+      async function fetchSharedRecords() {
+        const res = await fetch(boardUrl('.json') + '?t=' + Date.now(), { cache: 'no-store' });
+        if (!res.ok) throw new Error('leaderboard fetch failed: ' + res.status);
+        const data = await res.json();
+        if (!data || typeof data !== 'object') return [];
+        return Object.entries(data).map(([id, value]) => {
+          const record = normalizeRecord(value);
+          record.id = id;
+          return record;
+        });
+      }
+
+      function applySharedRecords(records) {
+        top5 = sortTop(records);
+        localStorage.setItem(STORAGE_KEYS.leaderboard, JSON.stringify(top5));
+        best = Math.max(best, top5[0] ? top5[0].score : 0);
+        localStorage.setItem(STORAGE_KEYS.bestScore, String(best));
+        sharedLeaderboardReady = true;
+        sharedLeaderboardError = false;
+        renderRanking();
+        updateHud();
+        return top5;
+      }
+
       async function fetchSharedTop5() {
         if (!isSharedEnabled()) {
           sharedLeaderboardReady = false;
@@ -780,21 +837,8 @@
           return top5;
         }
         try {
-          const res = await fetch(boardUrl('.json') + '?t=' + Date.now(), { cache: 'no-store' });
-          if (!res.ok) throw new Error('leaderboard fetch failed: ' + res.status);
-          const data = await res.json();
-          const records = data && typeof data === 'object' ? Object.entries(data).map(([id, value]) => ({ ...value, id })) : [];
-          top5 = sortTop(records);
-          // Firebase 주소가 설정된 경우 화면에는 서버 기록을 기준으로 보여준다.
-          // localStorage는 오프라인/임시 캐시로만 저장한다.
-          localStorage.setItem(STORAGE_KEYS.leaderboard, JSON.stringify(top5));
-          best = Math.max(best, top5[0] ? top5[0].score : 0);
-          localStorage.setItem(STORAGE_KEYS.bestScore, String(best));
-          sharedLeaderboardReady = true;
-          sharedLeaderboardError = false;
-          renderRanking();
-          updateHud();
-          return top5;
+          const records = await fetchSharedRecords();
+          return applySharedRecords(records);
         } catch (error) {
           console.warn('[shared ranking] fetch failed', error);
           sharedLeaderboardReady = false;
@@ -806,7 +850,7 @@
       }
 
       async function submitSharedRecord(record) {
-        if (!isSharedEnabled()) return false;
+        if (!isSharedEnabled()) return { ok: false, saved: false };
         try {
           const safeRecord = normalizeRecord({
             ...record,
@@ -815,34 +859,51 @@
             createdAt: Number(record.createdAt) || Date.now()
           });
           safeRecord.nearMiss = safeRecord.near;
+          const records = await fetchSharedRecords();
+          const playerKey = normalizePlayerKey(safeRecord.name);
+          const matchingRecords = records.filter(item => normalizePlayerKey(item.name) === playerKey);
+          const bestExisting = matchingRecords.slice().sort(compareRankRecords)[0] || null;
+
+          if (bestExisting && !isBetterRecord(safeRecord, bestExisting)) {
+            await trimSharedLeaderboard();
+            await fetchSharedTop5();
+            return { ok: true, saved: false };
+          }
+
           const id = String(safeRecord.createdAt) + '_' + Math.random().toString(36).slice(2, 8);
-          const res = await fetch(boardUrl('/' + encodeURIComponent(id) + '.json'), {
-            method: 'PUT',
+          const updates = {};
+          matchingRecords.forEach(item => {
+            if (item.id) updates[item.id] = null;
+          });
+          updates[id] = safeRecord;
+          const res = await fetch(boardUrl('.json'), {
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(safeRecord)
+            body: JSON.stringify(updates)
           });
           if (!res.ok) throw new Error('leaderboard submit failed: ' + res.status);
           await trimSharedLeaderboard();
           await fetchSharedTop5();
-          return true;
+          return { ok: true, saved: true };
         } catch (error) {
           console.warn('[shared ranking] submit failed', error);
           sharedLeaderboardReady = false;
           sharedLeaderboardError = true;
           renderRanking();
-          return false;
+          return { ok: false, saved: false };
         }
       }
 
       async function trimSharedLeaderboard() {
         if (!isSharedEnabled()) return;
-        const res = await fetch(boardUrl('.json'), { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data || typeof data !== 'object') return;
-        const records = Object.entries(data).map(([id, value]) => ({ ...normalizeRecord(value), id })).sort(compareRecord);
-        const extra = records.slice(SERVER_RECORD_LIMIT);
-        await Promise.all(extra.map(record => fetch(boardUrl('/' + encodeURIComponent(record.id) + '.json'), { method: 'DELETE' })));
+        const records = await fetchSharedRecords();
+        const keepRecords = dedupeLeaderboardByNickname(records, SERVER_RECORD_LIMIT);
+        const keepIds = new Set(keepRecords.map(record => record.id).filter(Boolean));
+        const extraRecords = records.filter(record => record.id && !keepIds.has(record.id));
+        const responses = await Promise.all(extraRecords.map(record =>
+          fetch(boardUrl('/' + encodeURIComponent(record.id) + '.json'), { method: 'DELETE' })
+        ));
+        if (responses.some(response => !response.ok)) throw new Error('leaderboard cleanup failed');
       }
 
       function makeFinalRecord(seconds) {
@@ -873,9 +934,11 @@
 
         if (isSharedEnabled()) {
           showToast('공유 랭킹 저장 중...', 1200);
-          const ok = await submitSharedRecord(record);
-          if (ok) {
+          const result = await submitSharedRecord(record);
+          if (result.ok && result.saved) {
             showToast('서버 랭킹 저장 완료!', 1200);
+          } else if (result.ok) {
+            showToast('기존 기록이 더 높아 현재 기록을 유지합니다.', 1800);
           } else {
             saveLocalTop5(readTop5().concat(record));
             showToast('서버 저장 실패: 이 기기에만 임시 저장됨', 1800);
