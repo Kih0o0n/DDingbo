@@ -500,7 +500,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.7: leaderboard ranking and nickname validation improvements -->
+    <!-- v1.2.8: separate player/game-over art and revised body hitbox -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -535,7 +535,7 @@
         </div>
         <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
         <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
-        <div class="version-badge">v1.2.7</div>
+        <div class="version-badge">v1.2.8</div>
       </div>
     </section>
 
@@ -634,7 +634,8 @@
       });
       const ASSET_PATHS = Object.freeze({
         obstacle: 'assets/hmb.png',
-        player: 'assets/player.png'
+        player: 'assets/player.png',
+        playerGameOver: 'assets/player_gameover.png'
       });
       const FIREBASE_CONFIG = Object.freeze({
         databaseUrl: 'https://ddingbo-rank-default-rtdb.asia-southeast1.firebasedatabase.app',
@@ -648,6 +649,7 @@
       const LEADERBOARD_LIMIT = 5;
       const SERVER_RECORD_LIMIT = 20;
       const COMBO_WINDOW_SECONDS = 2;
+      const GAME_OVER_OVERLAY_DELAY_MS = 1000;
       const DPR_LIMIT = 2;
 
       // 실행 상태
@@ -683,6 +685,7 @@
       let comboExpiresAt = 0;
       let nearCount = 0;
       let lastMilestone = 0;
+      let gameOverOverlayTimer = 0;
 
       // 이미지와 게임 객체
       const hmbImg = new Image();
@@ -697,6 +700,13 @@
       playerImg.onerror = () => { playerFailed = true; };
       playerImg.src = ASSET_PATHS.player;
 
+      const playerGameOverImg = new Image();
+      let playerGameOverLoaded = false;
+      let playerGameOverFailed = false;
+      playerGameOverImg.onload = () => { playerGameOverLoaded = true; };
+      playerGameOverImg.onerror = () => { playerGameOverFailed = true; };
+      playerGameOverImg.src = ASSET_PATHS.playerGameOver;
+
       const player = {
         x: 0,
         y: 0,
@@ -708,7 +718,8 @@
         shieldUntil: 0,
         invincibleUntil: 0,
         blinkUntil: 0,
-        noteUntil: 0
+        noteUntil: 0,
+        isDefeated: false
       };
 
       let obstacles = [];
@@ -1008,10 +1019,17 @@
         return Math.max(104, 98 + safeBottom);
       }
 
+      function getImageAspect(image, fallback) {
+        if (image && image.naturalWidth > 0 && image.naturalHeight > 0) {
+          return image.naturalWidth / image.naturalHeight;
+        }
+        return fallback;
+      }
+
       function positionPlayer() {
         const minDrawH = H < 520 ? 43 : 51;
         player.drawH = Math.max(minDrawH, Math.min(73, W * 0.1595));
-        player.drawW = Math.round(player.drawH * (2 / 3));
+        player.drawW = Math.round(player.drawH * getImageAspect(playerImg, 1));
         const bottomOffset = getBottomReserve();
         player.y = H - bottomOffset - player.drawH * 0.20;
         if (!player.x) player.x = W / 2;
@@ -1056,6 +1074,8 @@
         shake = 0;
         releaseControls();
         clearTimeout(toastTimer);
+        clearTimeout(gameOverOverlayTimer);
+        gameOverOverlayTimer = 0;
         toast.classList.remove('show');
         obstacles = [];
         items = [];
@@ -1071,6 +1091,7 @@
         player.invincibleUntil = 0;
         player.blinkUntil = 0;
         player.noteUntil = 0;
+        player.isDefeated = false;
         updateHud();
       }
 
@@ -1095,7 +1116,9 @@
 
       function endGame() {
         if (state !== GAME_STATE.PLAYING) return;
+        player.isDefeated = true;
         state = GAME_STATE.GAME_OVER;
+        releaseControls();
         playTone('whistle');
         shake = Math.max(shake, 18);
         pendingRecord = makeFinalRecord(elapsed);
@@ -1128,7 +1151,8 @@
         } else {
           nameEntry.classList.remove('show');
         }
-        setTimeout(() => {
+        clearTimeout(gameOverOverlayTimer);
+        gameOverOverlayTimer = setTimeout(() => {
           if (state !== GAME_STATE.GAME_OVER || pendingRecord !== finishedRecord) return;
           startOverlay.classList.add('is-hidden');
           startOverlay.style.display = 'none';
@@ -1137,7 +1161,8 @@
           gameOverOverlay.classList.remove('is-hidden');
           gameOverOverlay.style.display = '';
           if (shouldAskName) playerNameInput.focus({ preventScroll: true });
-        }, 220);
+          gameOverOverlayTimer = 0;
+        }, GAME_OVER_OVERLAY_DELAY_MS);
       }
 
       function getEndingText(seconds) {
@@ -1437,10 +1462,11 @@
       }
 
       function getPlayerHitCircle() {
+        const top = player.y - player.drawH * 0.82;
         return {
           x: player.x,
-          y: player.y - player.drawH * 0.32,
-          r: Math.max(player.drawW * 0.38, player.drawH * 0.22)
+          y: top + player.drawH * 0.62,
+          r: Math.max(player.drawW * 0.25, player.drawH * 0.24)
         };
       }
 
@@ -1453,10 +1479,10 @@
         const w = player.drawW;
         const h = player.drawH;
         return [
-          { x: player.x, y: top + h * 0.26, rx: w * 0.43, ry: h * 0.19 },
-          { x: player.x, y: top + h * 0.50, rx: w * 0.26, ry: h * 0.25 },
-          { x: player.x - w * 0.16, y: top + h * 0.73, rx: w * 0.14, ry: h * 0.25 },
-          { x: player.x + w * 0.16, y: top + h * 0.73, rx: w * 0.14, ry: h * 0.25 }
+          { x: player.x, y: top + h * 0.52, rx: w * 0.27, ry: h * 0.24 },
+          { x: player.x, y: top + h * 0.70, rx: w * 0.25, ry: h * 0.18 },
+          { x: player.x - w * 0.13, y: top + h * 0.85, rx: w * 0.11, ry: h * 0.18 },
+          { x: player.x + w * 0.13, y: top + h * 0.85, rx: w * 0.11, ry: h * 0.18 }
         ];
       }
 
@@ -1718,6 +1744,15 @@
       function drawPlayer() {
         const blink = elapsed < player.blinkUntil && Math.floor(elapsed * 16) % 2 === 0;
         if (blink) return;
+        const useGameOverImage = player.isDefeated && playerGameOverLoaded && !playerGameOverFailed;
+        const selectedPlayerImg = useGameOverImage
+          ? playerGameOverImg
+          : playerLoaded && !playerFailed
+            ? playerImg
+            : null;
+        const selectedDrawW = useGameOverImage
+          ? Math.round(player.drawH * getImageAspect(playerGameOverImg, 2 / 3))
+          : player.drawW;
         ctx.save();
         ctx.translate(player.x, player.y);
 
@@ -1733,8 +1768,8 @@
         ctx.shadowBlur = 14;
         ctx.shadowOffsetY = 8;
 
-        if (playerLoaded && !playerFailed) {
-          ctx.drawImage(playerImg, -player.drawW / 2, -player.drawH * 0.82, player.drawW, player.drawH);
+        if (selectedPlayerImg) {
+          ctx.drawImage(selectedPlayerImg, -selectedDrawW / 2, -player.drawH * 0.82, selectedDrawW, player.drawH);
         } else {
           ctx.fillStyle = '#facc15';
           roundRect(ctx, -player.r * 0.9, -player.r * 1.1, player.r * 1.8, player.r * 2.15, 12);
