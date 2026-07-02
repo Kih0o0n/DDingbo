@@ -498,7 +498,7 @@
 </head>
 <body>
   <div id="app" aria-label="띵보님 피하기 게임">
-    <!-- v1.2.5-hotfix5: start button event delegation fix -->
+    <!-- v1.2.6: no wave, progressive fair difficulty -->
     <!-- 게임 화면 -->
     <canvas id="gameCanvas"></canvas>
 
@@ -533,7 +533,7 @@
         </div>
         <button id="startBtn" class="primary-btn" type="button">경기 시작</button>
         <button id="leaderboardBtn" class="secondary-btn" type="button">명예의 전당 확인</button>
-        <div class="version-badge">v1.2.5-hotfix5</div>
+        <div class="version-badge">v1.2.6</div>
       </div>
     </section>
 
@@ -671,12 +671,7 @@
       let hmbFailed = false;
       let nextObstacleAt = 0;
       let nextItemAt = 0;
-      let nextWaveAt = 22;
       let nextBossAt = 38;
-      let waveSafetyUntil = 0;
-      let waveCorridorUntil = 0;
-      let waveCorridorMin = 0;
-      let waveCorridorMax = 0;
       let shake = 0;
       let leftHeld = false;
       let rightHeld = false;
@@ -954,12 +949,7 @@
         lastMilestone = 0;
         nextObstacleAt = 0;
         nextItemAt = 4.5;
-        nextWaveAt = 18;
         nextBossAt = 38;
-        waveSafetyUntil = 0;
-        waveCorridorUntil = 0;
-        waveCorridorMin = 0;
-        waveCorridorMax = 0;
         hiddenAt = 0;
         shake = 0;
         releaseControls();
@@ -1131,44 +1121,27 @@
       // 생성 패턴과 난이도
       function updateSpawning() {
         const intensity = getIntensity();
-        if (elapsed >= nextWaveAt) {
-          spawnWave();
-          nextWaveAt = elapsed + random(21, 27);
-        }
         if (elapsed >= nextObstacleAt) {
           spawnObstacleRandom();
-          const baseGap = lerp(0.78, 0.36, intensity);
-          nextObstacleAt = elapsed + random(baseGap * 0.72, baseGap * 1.18);
+          const baseGap = lerp(0.86, 0.31, intensity);
+          nextObstacleAt = elapsed + random(baseGap * 0.70, baseGap * 1.12);
         }
         if (elapsed >= nextItemAt) {
           spawnItem();
           nextItemAt = elapsed + random(9, 15);
         }
-        if (elapsed >= nextBossAt) {
+        if (elapsed >= nextBossAt && elapsed >= 35) {
           spawnBoss();
-          nextBossAt = elapsed + random(38, 48);
+          nextBossAt = elapsed + random(34, 46);
         }
       }
 
       function getIntensity() {
-        return clamp(elapsed / 95, 0, 1);
+        return clamp(elapsed / 100, 0, 1);
       }
 
-      function getRandomSpawnX(r) {
-        if (elapsed < waveCorridorUntil && waveCorridorMax > waveCorridorMin) {
-          const leftMin = r + 8;
-          const leftMax = waveCorridorMin - r - 10;
-          const rightMin = waveCorridorMax + r + 10;
-          const rightMax = W - r - 8;
-          const canLeft = leftMax > leftMin;
-          const canRight = rightMax > rightMin;
-          if (canLeft && canRight) {
-            return Math.random() < 0.5 ? random(leftMin, leftMax) : random(rightMin, rightMax);
-          }
-          if (canLeft) return random(leftMin, leftMax);
-          if (canRight) return random(rightMin, rightMax);
-        }
-        return random(r + 8, W - r - 8);
+      function getMaxObstacleCount() {
+        return Math.floor(lerp(8, 14, getIntensity()));
       }
 
       function estimateObstacleX(ob, t) {
@@ -1178,55 +1151,79 @@
         return ob.x + (ob.vx || 0) * t;
       }
 
-      function getWaveGapScore(index, cell, waveRadius, waveSpeed, rowCount, rowGap) {
+      function scoreSpawnCandidate(x, r, vy, type) {
         const hit = getPlayerHitCircle();
-        const center = cell * index + cell / 2;
-        const corridorHalf = Math.max(cell * 0.48, getPlayerHorizontalRadius() + waveRadius * 0.20);
-        const firstPass = Math.max(0, (hit.y + 68) / waveSpeed - 0.35);
-        const lastPass = Math.max(firstPass + 0.8, (hit.y + 68 + rowGap * (rowCount - 1)) / waveSpeed + 0.85);
+        const newArrive = clamp((hit.y + r + 80) / Math.max(70, vy), 0.4, 4.2);
+        const playerSafe = getPlayerHorizontalRadius() + r + 20;
         let score = 0;
+
+        // 시작부터 플레이어 바로 위만 계속 막지 않도록 약간 벌린다.
+        const playerDx = Math.abs(x - player.x);
+        if (playerDx < playerSafe) {
+          score += (1 - playerDx / playerSafe) * (type === 'fast' ? 7 : 4.5);
+        }
 
         for (const ob of obstacles) {
           if (ob.y > H + ob.r || ob.y < -260) continue;
-          const vy = Math.max(40, ob.vy || 180);
-          const t = (hit.y - ob.y) / vy;
-          if (t < -0.25 || t > lastPass) continue;
-          const projectedX = estimateObstacleX(ob, clamp(t, 0, lastPass));
-          const blockRange = corridorHalf + (ob.hitRadius || ob.r * 0.72) + getPlayerHorizontalRadius() * 0.45;
-          const dx = Math.abs(projectedX - center);
-          if (dx < blockRange) {
-            const passMid = (firstPass + lastPass) / 2;
-            const timeWeight = 1 + Math.max(0, 1.8 - Math.abs(t - passMid));
-            score += ((blockRange - dx) / blockRange) * 10 * timeWeight;
+          const obVy = Math.max(60, ob.vy || 170);
+          const t = clamp((hit.y - ob.y) / obVy, 0, 4.2);
+          const projectedX = estimateObstacleX(ob, t);
+          const projectedY = ob.y + obVy * t;
+          const timeDiff = Math.abs(t - newArrive);
+          const verticalRelevant = projectedY > hit.y - 210 && projectedY < hit.y + 130;
+          const blockRange = r + (ob.hitRadius || ob.r * 0.72) + getPlayerHorizontalRadius() * 0.55 + 20;
+          const dx = Math.abs(projectedX - x);
+
+          if (dx < blockRange && (timeDiff < 1.25 || verticalRelevant)) {
+            score += ((blockRange - dx) / blockRange) * (9 / (1 + timeDiff));
+          }
+
+          if (ob.y < H * 0.45 && Math.abs(ob.x - x) < r + ob.r + 26) {
+            score += 4;
           }
         }
+
         return score;
       }
 
-      function chooseWaveGapIndex(count, cell, waveRadius, waveSpeed, rowCount, rowGap) {
+      function getFairSpawnX(r, type, vy) {
         const candidates = [];
-        for (let i = 1; i < count - 1; i++) {
-          candidates.push({ index: i, score: getWaveGapScore(i, cell, waveRadius, waveSpeed, rowCount, rowGap) });
+        const lanes = Math.max(6, Math.min(9, Math.floor(W / 54)));
+        for (let i = 0; i < lanes; i++) {
+          candidates.push(clamp((W / lanes) * (i + 0.5), r + 8, W - r - 8));
         }
-        candidates.sort((a, b) => a.score - b.score || Math.abs(a.index - count / 2) - Math.abs(b.index - count / 2));
-        return candidates[0] || { index: Math.floor(count / 2), score: 0 };
+        for (let i = 0; i < 10; i++) {
+          candidates.push(random(r + 8, W - r - 8));
+        }
+
+        candidates.sort((a, b) => scoreSpawnCandidate(a, r, vy, type) - scoreSpawnCandidate(b, r, vy, type));
+        return candidates[0] || random(r + 8, W - r - 8);
       }
 
       function spawnObstacleRandom() {
         const intensity = getIntensity();
+        if (obstacles.length >= getMaxObstacleCount()) return false;
+
         const roll = Math.random();
         let type = 'normal';
-        if (elapsed > 8 && roll < 0.13) type = 'chaser';
-        else if (elapsed > 15 && roll < 0.23) type = 'fast';
-        else if (elapsed > 25 && roll < 0.29) type = 'zigzag';
-        else if (elapsed > 33 && roll < 0.34) type = 'big';
+        const chaserChance = lerp(0.08, 0.17, intensity);
+        const fastChance = lerp(0.09, 0.19, intensity);
+        const zigzagChance = lerp(0.05, 0.13, intensity);
+        const bigChance = lerp(0.03, 0.09, intensity);
+
+        if (elapsed > 10 && roll < chaserChance) type = 'chaser';
+        else if (elapsed > 16 && roll < chaserChance + fastChance) type = 'fast';
+        else if (elapsed > 26 && roll < chaserChance + fastChance + zigzagChance) type = 'zigzag';
+        else if (elapsed > 38 && roll < chaserChance + fastChance + zigzagChance + bigChance) type = 'big';
+
         createObstacle({ type, intensity });
+        return true;
       }
 
       function createObstacle({ type = 'normal', x = null, y = null, size = null, speed = null, intensity = getIntensity(), vx = null } = {}) {
-        const baseSize = size || random(42, 60) + intensity * 10;
+        const baseSize = size || random(41, 58) + intensity * 11;
         let r = baseSize / 2;
-        let vy = speed || random(145, 205) + intensity * 115;
+        let vy = speed || random(142, 202) + intensity * 135;
         let spin = random(-2.4, 2.4);
         let wobble = random(0.8, 1.8);
         let amp = random(8, 22);
@@ -1251,7 +1248,7 @@
         }
         const ob = {
           type,
-          x: x ?? getRandomSpawnX(r),
+          x: x ?? getFairSpawnX(r, type, vy),
           y: y ?? -r - random(10, 80),
           baseX: 0,
           r,
@@ -1267,53 +1264,6 @@
         };
         ob.baseX = ob.x;
         obstacles.push(ob);
-      }
-
-      function spawnWave() {
-        showToast('띵보님 웨이브! 안전 통로를 찾아라!', 1200);
-        playTone('wave');
-        shake = Math.max(shake, 8);
-
-        // 기존 방해물은 제거하지 않는다.
-        // 대신 현재 내려오는 장애물의 예상 위치를 보고, 안전 통로가 막히지 않는 열을 골라 억까 패턴을 줄인다.
-        waveSafetyUntil = elapsed;
-        const count = Math.max(7, Math.min(9, Math.floor(W / 52)));
-        const cell = W / count;
-        const r = clamp(cell * 0.37, 23, 34);
-        const rowCount = 4;
-        const rowGap = 64;
-        const waveSpeed = 236 + getIntensity() * 62;
-        const chosen = chooseWaveGapIndex(count, cell, r, waveSpeed, rowCount, rowGap);
-        const safeColumns = new Set([chosen.index]);
-
-        // 모든 한 칸 통로가 이미 위험한 경우에만 보조 통로를 하나 추가한다.
-        // 평소에는 한 칸 통로라 어렵고, 정말 막힐 때만 억울한 사망을 방지한다.
-        if (chosen.score > 7.5) {
-          const leftScore = chosen.index > 1 ? getWaveGapScore(chosen.index - 1, cell, r, waveSpeed, rowCount, rowGap) : Infinity;
-          const rightScore = chosen.index < count - 2 ? getWaveGapScore(chosen.index + 1, cell, r, waveSpeed, rowCount, rowGap) : Infinity;
-          if (leftScore < rightScore && Number.isFinite(leftScore)) safeColumns.add(chosen.index - 1);
-          else if (Number.isFinite(rightScore)) safeColumns.add(chosen.index + 1);
-        }
-
-        const minSafe = Math.min(...safeColumns);
-        const maxSafe = Math.max(...safeColumns);
-        waveCorridorMin = minSafe * cell;
-        waveCorridorMax = (maxSafe + 1) * cell;
-        waveCorridorUntil = elapsed + Math.max(3.4, (player.y + rowGap * rowCount) / waveSpeed + 0.7);
-
-        for (let row = 0; row < rowCount; row++) {
-          for (let i = 0; i < count; i++) {
-            if (safeColumns.has(i)) continue;
-            createObstacle({
-              type: 'wave',
-              x: cell * i + cell / 2,
-              y: -68 - row * rowGap,
-              size: r * 2,
-              speed: random(216, 264) + getIntensity() * 64,
-              vx: 0
-            });
-          }
-        }
       }
 
       function spawnBoss() {
@@ -1856,7 +1806,7 @@
           beep(now + 0.08, 520, 0.12, 'sawtooth', master, 0.04);
           return;
         }
-        if (type === 'wave' || type === 'boss') {
+        if (type === 'boss') {
           beep(now, 220, 0.09, 'sawtooth', master, 0.05);
           beep(now + 0.09, 180, 0.09, 'sawtooth', master, 0.05);
           beep(now + 0.18, 260, 0.14, 'sawtooth', master, 0.05);
